@@ -18,6 +18,8 @@ import { COLOR_KEYS, COLOR_META, GOOGLE_COLORS, hexOf, nameOf, duplicates, class
 
 const app = document.getElementById('app'), modalEl = document.getElementById('modal'), tabsEl = document.getElementById('tabs');
 const ui = { tab: 'home', viewDay: dayKey(), modal: null, open: {} };
+// L'onglet et le jour affichés survivent à un rechargement (adresse #plan, #bilan…)
+try { const t = location.hash.slice(1); if (['home', 'plan', 'bilan', 'week', 'settings'].includes(t)) ui.tab = t; const v = sessionStorage.getItem('temps-vd'); if (/^\d{4}-\d\d-\d\d$/.test(v || '')) ui.viewDay = v; } catch { /* ignoré */ }
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const SHORT = { etu: 'Études', trav: 'Travail', obl: 'Obligation', vie: 'Quotidien', pause: 'Pause', loisir: 'Loisir' };
 /** Choix du sélecteur ('etu' | 'trav' | autre) → catégorie interne + type de travail productif. */
@@ -307,6 +309,10 @@ function applyColors() {
 }
 function render() {
   applyColors();
+  try {
+    if (location.hash.slice(1) !== ui.tab) history[location.hash ? 'pushState' : 'replaceState'](null, '', '#' + ui.tab);   // le bouton « retour » du téléphone revient à l'onglet précédent
+    sessionStorage.setItem('temps-vd', ui.viewDay);
+  } catch { /* ignoré */ }
   app.innerHTML = views[ui.tab]();
   tabsEl.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.tab === ui.tab));
 }
@@ -565,8 +571,9 @@ async function gcalPushDay(k, prov) {
   const a = analyse(st, k, Date.now());
   const mn = ms => Math.max(0, Math.min(1440, Math.round((ms - s0) / 60000)));
   const items = [
-    ...day.plan.filter(b => b.cat === 'prod' && !IMPORTED.includes(b.source) && blockDone(st, k, b, Date.now()) < (b.end - b.start) / 2)
-      .map(b => ({ id: b.id, start: b.start, end: b.end, summary: `${emojiOf(b)} ${b.title}`, colorId: col[subOf(b)] })),
+    // sessions prévues pas encore faites + contraintes saisies dans l'app (rendez-vous, repas…) ; jamais les événements venant de Google
+    ...day.plan.filter(b => !IMPORTED.includes(b.source) && b.cat !== 'unk' && (b.fixed || (b.cat === 'prod' && blockDone(st, k, b, Date.now()) < (b.end - b.start) / 2)))
+      .map(b => ({ id: b.id, start: b.start, end: b.end, summary: `${b.unplanned ? '⚡' : emojiOf(b)} ${b.title}`, colorId: col[b.unplanned ? 'imp' : subOf(b)] })),
     ...day.log.filter(e => e.cat !== 'unk' && !e.id.startsWith('g:') && mn(e.end) > mn(e.start))
       .map(e => ({ id: `log:${e.id}`, start: mn(e.start), end: mn(e.end), summary: `${e.unplanned ? '⚡' : emojiOf(e)} ${e.title}`, colorId: col[e.unplanned ? 'imp' : subOf(e)] })),
     ...(used ? a.lostSegs.map(g => ({ id: g.id, start: g.start, end: g.end, summary: `⬛ ${g.title}`, colorId: col.lost })) : []),
@@ -736,6 +743,7 @@ document.addEventListener('change', async e => {
   }
 });
 
+window.addEventListener('popstate', () => { const t = location.hash.slice(1); if (views[t] && t !== ui.tab) { ui.tab = t; render(); } });
 document.addEventListener('toggle', e => { const d = e.target; if (d.dataset && d.dataset.sec) ui.open[d.dataset.sec] = d.open; }, true);
 
 tabsEl.addEventListener('click', e => {

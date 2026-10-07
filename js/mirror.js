@@ -80,14 +80,20 @@ export function applyMirror(st, events, classify, { fromMs, toMs, uid }) {
     } else {                                            // session planifiée
       const b = d.plan.find(x => x.id === item);
       if (!b) continue;
-      if (k.cat === 'prod') {
+      if (k.cat === 'prod' || b.fixed) {
         const nk = dayKey(new Date(e.start)), s = minutes(e.start, nk), z = minutes(e.end, nk);
         const t = stripEmoji(e.title) || b.title;
         if (nk === r.dk) {
-          if (b.start !== s || b.end !== z || b.sub !== k.sub || b.title !== t) { Object.assign(b, { start: s, end: z, sub: k.sub, title: t }); stat.updated++; }
+          if (b.start !== s || b.end !== z || b.sub !== k.sub || b.cat !== k.cat || b.title !== t || !!b.unplanned !== !!k.unplanned) {
+            Object.assign(b, { start: s, end: z, cat: k.cat, title: t });
+            if (k.sub) b.sub = k.sub; else delete b.sub;
+            if (k.unplanned) b.unplanned = true; else delete b.unplanned;
+            stat.updated++;
+          }
         } else {                                        // déplacée un autre jour
           d.plan = d.plan.filter(x => x !== b);
-          const nd = ensure(nk); nd.plan.push({ ...b, start: s, end: z, sub: k.sub, title: t });
+          const nb = { ...b, start: s, end: z, cat: k.cat, title: t }; if (k.sub) nb.sub = k.sub; else delete nb.sub;
+          const nd = ensure(nk); nd.plan.push(nb);
           nd.plan.sort((x, y) => x.start - y.start);
           nd.gcal = { ...(nd.gcal || {}), [item]: e.id }; delete d.gcal[item]; stat.updated++;
         }
