@@ -146,8 +146,8 @@ details.sec[open] > summary { margin-bottom: 8px; }
 .qbtn.sugg { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
 details.adj { margin-top: 10px; } details.adj > summary { color: var(--accent); cursor: pointer; font-size: .9rem; }
 
-/* Aucune page ne doit dépasser la largeur de l'écran (sinon le navigateur dézoome) */
-html, body { max-width: 100%; overflow-x: hidden; }
+/* Aucune page ne doit dépasser la largeur de l'écran (sinon le navigateur dézoome).
+   Pas de overflow-x sur html/body : cela bloque le défilement vers le bas sur certains téléphones. */
 main > *, .card, .sheet, .goal, .block, .alert { min-width: 0; }
 .card { overflow-wrap: anywhere; }
 .wd { padding: 8px 0; border-top: 1px solid var(--line); } .wd:first-of-type { border-top: 0; }
