@@ -11,7 +11,6 @@ import { signals } from './signals.js';
 import { classify } from './classify.js';
 import { parseICS, importEvents, clearImported } from './calendar.js';
 import * as gg from './google.js';
-import * as lock from './lock.js';
 import * as notify from './notify.js';
 
 const app = document.getElementById('app'), modalEl = document.getElementById('modal'), tabsEl = document.getElementById('tabs');
@@ -250,8 +249,8 @@ function renderSettings() {
     <button class="btn" data-act="gcal-import" ${s.gcalClientId ? '' : 'disabled'}>Importer les 7 prochains jours</button></div>
     <p class="muted small">Sans identifiant, tu peux importer un fichier .ics :</p>
     <label class="btn file">Importer un .ics<input type="file" accept=".ics,text/calendar" data-file="ics" hidden></label></section>
-    <section class="card"><h2>🔒 Sécurité</h2><p class="muted">Un code à 4 chiffres est demandé à l'ouverture et après 2 minutes en arrière-plan.</p>
-    <div class="row"><button class="btn" data-act="lock-now">Verrouiller maintenant</button><button class="btn" data-act="pin-change">Changer le code</button></div></section>
+    <section class="card"><h2>🔒 Sécurité</h2><p class="muted">Ton code est demandé à l'ouverture et après 2 minutes en arrière-plan.</p>
+    <div class="row"><button class="btn" data-act="lock-now">Verrouiller maintenant</button></div></section>
     <section class="card"><h2>Données</h2><p class="muted">Tout reste sur cet appareil. Exporte régulièrement une sauvegarde.</p>
     <div class="row"><button class="btn" data-act="export">Exporter</button>
     <label class="btn file">Importer<input type="file" accept="application/json" data-file="backup" hidden></label>
@@ -501,7 +500,6 @@ document.addEventListener('click', e => {
       alert(`Google Agenda (calendrier « Mon temps ») : ${r.created} créé(s), ${r.updated} mis à jour, ${r.deleted} supprimé(s).`);
     }); break;
     case 'lock-now': location.reload(); break;
-    case 'pin-change': lock.changePin().then(ok => ok && alert('Code modifié.')); break;
     case 'notif-perm': notify.askPermission().then(render); break;
     case 'export': {
       const a = document.createElement('a');
