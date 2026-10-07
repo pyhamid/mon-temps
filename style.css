@@ -1,7 +1,7 @@
 :root {
   --bg: #f6f7fb; --card: #fff; --text: #1d2033; --muted: #6b7088; --line: #e4e6ef; --accent: #4f46e5; --accent-t: #fff;
   --warn: #b45309; --danger: #b91c1c;
-  --c-prod: #4f46e5; --c-obl: #dc2626; --c-vie: #0d9488; --c-pause: #16a34a; --c-loisir: #d97706; --c-unk: #94a3b8; --c-imp: #f4511e;
+  --c-prod: #4f46e5; --c-obl: #dc2626; --c-vie: #0d9488; --c-pause: #16a34a; --c-loisir: #d97706; --c-unk: #94a3b8; --c-imp: #f4511e; --c-etu: #0b8043; --c-trav: #8e24aa;
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg: #11131c; --card: #1b1e2c; --text: #eceef7; --muted: #9aa0ba; --line: #2b2f42; --accent: #818cf8; --accent-t: #11131c; --warn: #fbbf24; --danger: #f87171;
@@ -155,3 +155,6 @@ main > *, .card, .sheet, .goal, .block, .alert { min-width: 0; }
 .wdh b { display: inline-block; } .wdh b::first-letter { text-transform: uppercase; }
 .wdh small { color: var(--muted); font-weight: 400; }
 .wdc { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 2px; font-size: .85rem; color: var(--muted); }
+
+.c-etu .bar i { background: var(--c-etu); } .c-trav .bar i { background: var(--c-trav); }
+.block.c-etu { border-left-color: var(--c-etu); } .block.c-trav { border-left-color: var(--c-trav); }
