@@ -3,6 +3,8 @@
 // Limite connue : sans serveur, c'est une barrière pour les curieux, pas une protection absolue.
 const KEY = 'temps-lock';
 const CODE = { salt: 'vexgzuFpD+PJly+fR8JPoA==', hash: 'MK14q6/LRwdOwvJEGphZ7hiUUTT5levDU55nfahMz7Q=' };
+const TRUST_KEY = 'temps-trust';       // appareil de confiance : le code n'est plus redemandé
+const TRUST_DAYS = 30;
 const MAX_FREE = 5;                 // essais avant temporisation
 
 const b64 = u8 => btoa(String.fromCharCode(...u8));
@@ -33,6 +35,7 @@ function build() {
   ov.innerHTML = `<div class="lk"><div class="lk-ico">🔒</div><h2 id="lkT"></h2><div id="lkD" class="dots"></div>
     <p id="lkM" role="status"></p>
     <div class="pad">${[1, 2, 3, 4, 5, 6, 7, 8, 9, '', 0, '⌫'].map(k => k === '' ? '<span></span>' : `<button type="button" data-k="${k}" aria-label="${k === '⌫' ? 'Effacer' : k}">${k}</button>`).join('')}</div>
+    <label class="lk-rem"><input type="checkbox" id="lkR" checked> Rester connecté sur cet appareil (${TRUST_DAYS} jours)</label>
     <div class="lk-row"><button type="button" id="lkX" class="lk-link" hidden>Annuler</button></div></div>`;
   document.body.appendChild(ov);
   ov.addEventListener('click', e => { const b = e.target.closest('[data-k]'); if (b) press(b.dataset.k); });
@@ -72,8 +75,16 @@ function ask({ title, msg = '', cancellable = false }) {
 }
 const hide = () => { if (ov) ov.hidden = true; };
 
+/** Vrai si cet appareil a déjà saisi le code et a choisi de rester connecté. */
+export function isTrusted() {
+  try { return Number(localStorage.getItem(TRUST_KEY)) > Date.now(); } catch { return false; }
+}
+/** Oublie cet appareil : le code sera redemandé. */
+export function lockNow() { try { localStorage.removeItem(TRUST_KEY); } catch { /* ignoré */ } }
+
 /** Demande le code. Résout quand l'app peut s'ouvrir. */
 export async function unlock() {
+  if (isTrusted()) return;
   if (!crypto.subtle) {
     build(); ov.hidden = false;
     $('#lkT').textContent = 'Connexion non sécurisée';
@@ -92,7 +103,11 @@ export async function unlock() {
       continue;
     }
     const pin = await ask({ title: 'Entre ton code', msg });
-    if (await hash(pin, CODE.salt) === CODE.hash) { save({ fails: 0, until: 0 }); hide(); return; }
+    if (await hash(pin, CODE.salt) === CODE.hash) {
+      save({ fails: 0, until: 0 });
+      try { if ($('#lkR').checked) localStorage.setItem(TRUST_KEY, String(Date.now() + TRUST_DAYS * 86400000)); } catch { /* ignoré */ }
+      hide(); return;
+    }
     st.fails = (st.fails || 0) + 1;
     if (st.fails >= MAX_FREE) st.until = Date.now() + Math.min(900, 30 * 2 ** (st.fails - MAX_FREE)) * 1000;
     save(st);

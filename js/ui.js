@@ -12,6 +12,7 @@ import { classify } from './classify.js';
 import { parseICS, importEvents, clearImported, fetchICS } from './calendar.js';
 import * as gg from './google.js';
 import * as notify from './notify.js';
+import * as lock from './lock.js';
 
 const app = document.getElementById('app'), modalEl = document.getElementById('modal'), tabsEl = document.getElementById('tabs');
 const ui = { tab: 'home', viewDay: dayKey(), modal: null };
@@ -255,7 +256,7 @@ function renderSettings() {
     <button class="btn" data-act="gcal-import" ${s.gcalClientId ? '' : 'disabled'}>Importer les 7 prochains jours</button></div>
     <p class="muted small">Sans identifiant, tu peux importer un fichier .ics :</p>
     <label class="btn file">Importer un .ics<input type="file" accept=".ics,text/calendar" data-file="ics" hidden></label></section>
-    <section class="card"><h2>🔒 Sécurité</h2><p class="muted">Ton code est demandé à l'ouverture et après 2 minutes en arrière-plan.</p>
+    <section class="card"><h2>🔒 Sécurité</h2><p class="muted">Le code n'est demandé qu'une fois sur cet appareil si tu as coché « Rester connecté ». « Verrouiller maintenant » le redemandera.</p>
     <div class="row"><button class="btn" data-act="lock-now">Verrouiller maintenant</button></div></section>
     <section class="card"><h2>Données</h2><p class="muted">Tout reste sur cet appareil. Exporte régulièrement une sauvegarde.</p>
     <div class="row"><button class="btn" data-act="export">Exporter</button>
@@ -530,7 +531,7 @@ document.addEventListener('click', e => {
       update(s => { ensureDay(s, k).gcal = r.map; s.settings.gcalId = r.calId; });
       alert(`Google Agenda (calendrier « Mon temps ») : ${r.created} créé(s), ${r.updated} mis à jour, ${r.deleted} supprimé(s).`);
     }); break;
-    case 'lock-now': location.reload(); break;
+    case 'lock-now': lock.lockNow(); location.reload(); break;
     case 'notif-perm': notify.askPermission().then(render); break;
     case 'export': {
       const a = document.createElement('a');
