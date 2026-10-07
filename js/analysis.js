@@ -122,6 +122,15 @@ export function analyse(state, key, nowMs = Date.now()) {
   let futObl = 0, futVie = 0;
   for (let m = upto; m < bed; m++) { if (futureFixed[m] === 'obl') futObl++; else if (futureFixed[m] === 'vie') futVie++; }
 
+  // segments « perdus » : trous non identifiés + périodes déclarées « je ne sais plus »
+  const lostSegs = gaps.map(g => ({ id: `gap:${g.start}`, start: g.start, end: g.end, title: 'Non identifié' }));
+  for (const e of entriesOf(state, key, nowMs)) {
+    if (e.cat !== 'unk' || !e.dontKnow) continue;
+    const a = Math.max(0, Math.round((e.start - s0) / 60000)), z = Math.min(1440, Math.round((e.end - s0) / 60000));
+    if (z > a) lostSegs.push({ id: `lost:${e.id}`, start: a, end: z, title: 'Temps perdu' });
+  }
+  lostSegs.sort((x, y) => x.start - y.start);
+
   const awake = Math.max(0, upto - wake);
   const availSoFar = Math.max(0, awake - cat.obl - cat.vie);
   const availTotal = Math.max(0, (bed - wake) - cat.obl - futObl - cat.vie - futVie);
@@ -137,7 +146,7 @@ export function analyse(state, key, nowMs = Date.now()) {
   const target = active.reduce((a, g) => a + g.target, 0);
 
   return {
-    wake, bed, upto, awake, cat, gaps, pauseOver, goals, target, part,
+    wake, bed, upto, awake, cat, gaps, lostSegs, pauseOver, goals, target, part,
     unkPending, unkLost, availSoFar, availTotal,
     availRemaining: Math.max(0, availTotal - used),
     sleepMin: wake + 1440 - Math.min(state.days[key]?.sleepPlanned ?? state.settings.bed, 1440),

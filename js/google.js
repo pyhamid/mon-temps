@@ -86,19 +86,20 @@ export class GoogleCalendarProvider extends CalendarProvider {
   }
 
   /**
-   * Synchronise les sessions de productivité d'un jour : crée / met à jour / supprime.
-   * @param key jour 'YYYY-MM-DD' ; @param blocks blocs prod ; @param map { idBloc: idÉvénement } mémorisé par l'app
+   * Synchronise des plages d'un jour (sessions prévues, temps perdu) : crée / met à jour / supprime.
+   * @param key jour 'YYYY-MM-DD' ; @param items [{id,start,end,summary,colorId?}] ; @param map { idElément: idÉvénement } mémorisé par l'app
    * @returns nouvelle map + compteurs
    */
-  async pushDay(key, blocks, map = {}) {
+  async pushDay(key, items, map = {}) {
     const cal = encodeURIComponent(await this.ensureCalendar()), s0 = dayStartMs(key);
     const next = {}, n = { created: 0, updated: 0, deleted: 0 };
     const body = b => JSON.stringify({
-      summary: `📚 ${b.title}`,
+      summary: b.summary,
+      ...(b.colorId ? { colorId: b.colorId } : {}),
       start: { dateTime: new Date(s0 + b.start * 60000).toISOString(), timeZone: tz() },
       end: { dateTime: new Date(s0 + b.end * 60000).toISOString(), timeZone: tz() },
     });
-    for (const b of blocks) {
+    for (const b of items) {
       if (map[b.id]) {
         try { await api(`/calendars/${cal}/events/${map[b.id]}`, { method: 'PUT', body: body(b) }); next[b.id] = map[b.id]; n.updated++; continue; }
         catch (e) { if (e.status !== 404 && e.status !== 410) throw e; }

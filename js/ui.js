@@ -148,7 +148,7 @@ function renderPlan() {
     }).join('') : '<p class="muted">Planning vide.</p>'}
     <div class="row"><button class="btn" data-act="block-add">＋ Contrainte</button>
     ${!past ? '<button class="btn primary" data-act="plan-gen">✨ Proposer un planning</button>' : ''}
-    ${!past && s.gcalClientId && day.plan.some(b => b.cat === 'prod') ? '<button class="btn" data-act="gcal-push">📅 Envoyer vers Google Agenda</button>' : ''}</div>
+    ${s.gcalClientId && key <= dayKey() && (day.plan.some(b => b.cat === 'prod') || a.lostSegs.length) ? '<button class="btn" data-act="gcal-push">📅 Envoyer vers Google Agenda</button>' : ''}</div>
     <p class="muted small">Les contraintes (cours, rendez-vous, transport…) sont respectées. Rien n'est déplacé sans ton accord.</p></section>`;
   return html;
 }
@@ -171,6 +171,10 @@ function renderBilan() {
 
   if (a.goals.length)
     html += `<section class="card"><h2>🎯 Objectifs</h2>${a.goals.map(g => goalRow(g, key, false)).join('')}</section>`;
+
+  if (get().settings.gcalClientId && key <= dayKey() && a.lostSegs.length)
+    html += `<section class="card"><h2>⬛ Temps perdu dans Google Agenda</h2><p class="muted">${fmtDur(a.lostSegs.reduce((t, g) => t + g.end - g.start, 0))} en ${a.lostSegs.length} plage(s). Elles apparaissent en noir dans le calendrier « Mon temps ».</p>
+      <button class="btn primary" data-act="gcal-push">📅 Envoyer vers Google Agenda</button></section>`;
 
   if (a.gaps.length)
     html += `<section class="card"><h2>❓ À identifier</h2>${a.gaps.map(g => `<div class="alert"><span>${fmtHM(g.start)}–${fmtHM(g.end)} (${fmtDur(g.end - g.start)})</span>
@@ -525,13 +529,17 @@ document.addEventListener('click', e => {
     }); break;
     case 'gcal-push': gcalRun(async () => {
       if (!gg.isConnected()) await gg.connect(st.settings.gcalClientId);
-      const k = ui.viewDay, blocks = (st.days[k]?.plan || []).filter(b => b.cat === 'prod');
+      const k = ui.viewDay, a = analyse(st, k, Date.now());
+      const items = [
+        ...(st.days[k]?.plan || []).filter(b => b.cat === 'prod').map(b => ({ id: b.id, start: b.start, end: b.end, summary: `📚 ${b.title}` })),
+        // temps perdu / non identifié : en noir (Graphite, la couleur la plus sombre de Google Agenda)
+        ...a.lostSegs.map(g => ({ id: g.id, start: g.start, end: g.end, summary: `⬛ ${g.title}`, colorId: '8' })),
+      ];
       const prov = new gg.GoogleCalendarProvider(st.settings.gcalId);
-      const r = await prov.pushDay(k, blocks, st.days[k]?.gcal || {});
+      const r = await prov.pushDay(k, items, st.days[k]?.gcal || {});
       update(s => { ensureDay(s, k).gcal = r.map; s.settings.gcalId = r.calId; });
       alert(`Google Agenda (calendrier « Mon temps ») : ${r.created} créé(s), ${r.updated} mis à jour, ${r.deleted} supprimé(s).`);
     }); break;
-    case 'lock-now': lock.lockNow(); location.reload(); break;
     case 'notif-perm': notify.askPermission().then(render); break;
     case 'export': {
       const a = document.createElement('a');
