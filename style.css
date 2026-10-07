@@ -84,3 +84,43 @@ body.locked #tabs, body.locked header { visibility: hidden; }
 .pad button:active { background: var(--line); } .pad button:focus-visible { outline: 2px solid var(--accent); }
 .lk-row { display: flex; justify-content: center; gap: 18px; margin-top: 14px; }
 .lk-link { background: none; border: 0; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; padding: 8px; }
+
+/* ---------- Téléphone ---------- */
+html { -webkit-tap-highlight-color: transparent; }
+body { overscroll-behavior-y: none; }
+button, .btn, .chip, label.file, #tabs button { touch-action: manipulation; -webkit-user-select: none; user-select: none; }
+header { padding-top: calc(8px + env(safe-area-inset-top)); padding-bottom: 0; }
+h1 { font-size: 1.05rem; }
+.btn.small { min-height: 40px; min-width: 40px; padding: 6px 12px; }
+.goal > :first-child { flex: 1 1 0; min-width: 0; }
+.alert > span { flex: 1; min-width: 0; }
+.alert .btn { flex: none; }
+.sheet { max-height: 92dvh; max-height: 92vh; }
+@supports (height: 1dvh) { .sheet { max-height: 92dvh; } }
+@media (max-width: 480px) {
+  main { padding: 6px 12px; gap: 10px; }
+  header { padding-left: 12px; padding-right: 12px; }
+  .card { padding: 12px; border-radius: 14px; }
+  h2 { font-size: .98rem; }
+  .clock { font-size: clamp(2.2rem, 13vw, 2.8rem); }
+  .now .row .btn { flex: 1 1 0; }
+  .now .act { font-size: 1.15rem; }
+  .stats b { font-size: 1.1rem; }
+  .grid3 { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .grid3 input[type=time], .grid3 input[type=number] { padding: 8px 4px; font-size: .95rem; min-width: 0; }
+  .grid3 label { font-size: .75rem; align-self: end; }
+  .row > .btn { flex: 1 1 auto; }
+  .daynav b { font-size: .95rem; flex: 1; text-align: center; }
+  .block { gap: 8px; padding-left: 8px; }
+  .block .t { min-width: 40px; }
+  .wk { grid-template-columns: 32px 1fr 52px; }
+  .sheet { width: 100%; border-radius: 18px 18px 0 0; padding: 14px 14px calc(14px + env(safe-area-inset-bottom)); }
+  .sheet .btn { min-height: 46px; }
+  .sheet input[type=text], .sheet input[type=number], .sheet input[type=time] { min-height: 46px; }
+  .cats span { padding: 10px 14px; }
+  #tabs button { font-size: .68rem; min-height: 56px; }
+  body { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+}
+
+.lk-rem { display: flex; gap: 8px; align-items: center; justify-content: center; margin: 14px 0 0; font-size: .85rem; color: var(--muted); }
+.lk-rem input { width: 18px; height: 18px; }
