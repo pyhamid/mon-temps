@@ -159,7 +159,7 @@ function renderPlan() {
       const done = b.cat === 'prod' ? blockDone(st, key, b, now) : 0;
       return `<div class="block c-${subOf(b)}"><div class="t">${fmtHM(b.start)}<br>${fmtHM(b.end)}</div>
         <div class="grow"><b>${emojiOf(b)} ${esc(b.title)}</b>
-        <div class="muted">${b.fixed ? (IMPORTED.includes(b.source) ? 'calendrier' : 'contrainte') : 'proposé'}${done > 0 ? ` · fait ${fmtDur(done)}` : ''}</div></div>
+        <div class="muted">${b.fixed ? (IMPORTED.includes(b.source) ? 'calendrier' : 'contrainte') : 'proposé'}${b.dirty ? ' · ⏳ à envoyer' : ''}${b.ro ? ' · lecture seule' : ''}${done > 0 ? ` · fait ${fmtDur(done)}` : ''}</div></div>
         <div class="row tight">${!past && b.cat === 'prod' && key === dayKey() ? `<button class="btn small" data-act="start-block" data-id="${b.id}">▶</button>` : ''}
         <button class="btn small" data-act="block-edit" data-id="${b.id}">✎</button></div></div>`;
     }).join('') : '<p class="muted">Planning vide.</p>'}
@@ -473,7 +473,7 @@ function modalStale() {
 function modalBlock(id) {
   const b = id ? get().days[ui.viewDay]?.plan.find(x => x.id === id) : null;
   openModal(b ? 'Modifier le bloc' : 'Nouvelle contrainte', `<form data-submit="block" data-id="${id || ''}">
-    ${b && IMPORTED.includes(b.source) ? '<p class="muted small">📅 Cet événement vient de Google Agenda. Ta modification est gardée dans l\'app (statistiques), mais <b>ne change pas l\'événement dans Google</b> : pour cela, change sa couleur dans Google, puis importe.</p>' : ''}
+    ${b && IMPORTED.includes(b.source) ? `<p class="muted small">📅 Cet événement vient de Google Agenda. ${b.gref && !b.ro ? 'Au prochain <b>Envoyer</b>, il sera <b>modifié dans Google</b> (couleur, titre, heure).' : 'Son calendrier est en <b>lecture seule</b> : ta modification reste dans l\'app (statistiques) et ne change pas Google.'}</p>` : ''}
     <label>Titre<input type="text" name="title" value="${esc(b?.title)}" placeholder="Ex. Cours d'automatique" required></label>
     <div class="grid3"><label>De<input type="time" name="from" value="${toInput(b?.start ?? 9 * 60)}" required></label><label>À<input type="time" name="to" value="${toInput(b?.end ?? 10 * 60)}" required></label></div>
     ${catRadios(b ? subOf(b) : 'obl')}
@@ -483,9 +483,12 @@ function modalBlock(id) {
     update(st => {
       const d = ensureDay(st, ui.viewDay);
       if (f.id) {
-        const x = d.plan.find(p => p.id === f.id); Object.assign(x, { title: f.title.trim(), start, end, ...splitCat(f.cat), sub: splitCat(f.cat).sub, fixed: true, source: IMPORTED.includes(x.source) ? x.source : 'user' });
-        if (IMPORTED.includes(x.source)) {                                   // événement venu de Google : on retient ta correction pour les prochains imports
-          (st.settings.overrides ||= {})[x.id.replace(/:\d{4}-\d\d-\d\d$/, '')] = { cat: x.cat, ...(x.sub ? { sub: x.sub } : {}), title: x.title };
+        const x = d.plan.find(p => p.id === f.id), moved = x.start !== start || x.end !== end;
+        Object.assign(x, { title: f.title.trim(), start, end, ...splitCat(f.cat), sub: splitCat(f.cat).sub, fixed: true, source: IMPORTED.includes(x.source) ? x.source : 'user' });
+        if (IMPORTED.includes(x.source)) {                                   // événement venu de Google : correction retenue ; renvoyée à Google au prochain envoi si le calendrier le permet
+          const toGoogle = !!x.gref && !x.ro;
+          (st.settings.overrides ||= {})[x.id.replace(/:\d{4}-\d\d-\d\d$/, '')] = { cat: x.cat, ...(x.sub ? { sub: x.sub } : {}), title: x.title, ...(moved ? { start, end } : {}), ...(toGoogle ? { dirty: true } : {}) };
+          if (toGoogle) x.dirty = true;
         }
       }
       else d.plan.push({ id: uid(), title: f.title.trim(), start, end, ...splitCat(f.cat), fixed: true, source: 'user' });
@@ -587,6 +590,21 @@ async function gcalPushDay(k, prov) {
   const keep = day.log.filter(e => e.id.startsWith('g:')).map(e => e.id.slice(2));
   const r = await prov.pushDay(k, items, day.gcal || {}, keep);
   update(s => { ensureDay(s, k).gcal = r.map; s.settings.gcalId = r.calId; });
+  // événements venus d'autres calendriers que tu as corrigés dans l'app : on les modifie à la source
+  r.written = 0; r.readOnly = 0;
+  for (const b of day.plan.filter(x => x.dirty && x.gref && !x.ro)) {
+    const okey = b.id.replace(/:\d{4}-\d\d-\d\d$/, '');
+    try {
+      await prov.patchEvent(b.gref.c, b.gref.e, { summary: b.title, colorId: col[b.unplanned ? 'imp' : subOf(b)], start: b.start, end: b.end }, s0);
+      r.written++;
+      update(s => { const bb = s.days[k]?.plan.find(y => y.id === b.id); if (bb) delete bb.dirty; const o = s.settings.overrides?.[okey]; if (o) { delete o.dirty; delete o.start; delete o.end; } });
+    } catch (e) {
+      if (/insufficient|scope/i.test(e.message)) throw new Error('Permission manquante : clique sur « Se connecter à Google » et accepte la nouvelle autorisation (modifier tes événements).');
+      if (e.status !== 403 && e.status !== 404) throw e;
+      r.readOnly++;                                                      // calendrier en lecture seule (ex. abonnement de l'université)
+      update(s => { const bb = s.days[k]?.plan.find(y => y.id === b.id); if (bb) { delete bb.dirty; bb.ro = true; } const o = s.settings.overrides?.[okey]; if (o) delete o.dirty; });
+    }
+  }
   return r;
 }
 
@@ -701,7 +719,7 @@ document.addEventListener('click', e => {
       if (!gg.isConnected()) await gg.connect(st.settings.gcalClientId);
       const prov = new gg.GoogleCalendarProvider(st.settings.gcalId);
       const r = await gcalPushDay(ui.viewDay, prov);
-      alert(`Google Agenda (calendrier « Mon temps ») : ${r.created} créé(s), ${r.updated} mis à jour, ${r.deleted} supprimé(s).`);
+      alert(`Google Agenda — « Mon temps » : ${r.created} créé(s), ${r.updated} mis à jour, ${r.deleted} supprimé(s).${r.written ? `\nÉvénements d'origine modifiés dans Google : ${r.written}.` : ''}${r.readOnly ? `\n${r.readOnly} événement(s) dans un calendrier en lecture seule : non modifié(s) dans Google.` : ''}`);
     }); break;
     case 'gcal-cleanup': gcalRun(async () => {
       if (!confirm('Garder un seul calendrier « Mon temps », supprimer les autres, puis supprimer les événements en double (90 derniers jours). Continuer ?')) return;
@@ -713,9 +731,9 @@ document.addEventListener('click', e => {
     case 'gcal-push-week': gcalRun(async () => {
       if (!gg.isConnected()) await gg.connect(st.settings.gcalClientId);
       const prov = new gg.GoogleCalendarProvider(st.settings.gcalId);
-      let tot = { created: 0, updated: 0, deleted: 0 };
+      let tot = { created: 0, updated: 0, deleted: 0, written: 0, readOnly: 0 };
       for (let i = 6; i >= 0; i--) { const dk = addDays(key, -i); if (!userDay(get().days[dk])) continue; const r = await gcalPushDay(dk, prov); for (const q in tot) tot[q] += r[q]; }
-      alert(`7 derniers jours envoyés : ${tot.created} créé(s), ${tot.updated} mis à jour, ${tot.deleted} supprimé(s).`);
+      alert(`7 derniers jours envoyés : ${tot.created} créé(s), ${tot.updated} mis à jour, ${tot.deleted} supprimé(s)${tot.written ? `, ${tot.written} événement(s) d'origine modifié(s)` : ''}${tot.readOnly ? `, ${tot.readOnly} en lecture seule` : ''}.`);
     }); break;
     case 'notif-perm': notify.askPermission().then(render); break;
     case 'export': {

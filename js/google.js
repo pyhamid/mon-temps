@@ -1,12 +1,13 @@
 // Liaison Google Agenda (API v3) via Google Identity Services, sans serveur.
-// Droits demandés (minimum nécessaire) :
-//  - calendar.readonly       : lire tes événements existants (cours, rendez-vous…)
-//  - calendar.app.created    : créer et gérer UNIQUEMENT le calendrier "Mon temps" créé par l'app
+// Droits demandés :
+//  - calendar.readonly       : lire la liste de tes calendriers et tes événements (cours, rendez-vous…)
+//  - calendar.app.created    : créer et gérer le calendrier "Mon temps" créé par l'app
+//  - calendar.events         : modifier un événement existant (couleur, titre, heure) quand tu le changes dans l'app
 // Le jeton reste en mémoire (1 h) ; rien n'est envoyé ailleurs qu'à Google.
 import { CalendarProvider } from './calendar.js';
 import { dayStartMs } from './time.js';
 
-const SCOPES = 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.app.created';
+const SCOPES = 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.app.created https://www.googleapis.com/auth/calendar.events';
 const API = 'https://www.googleapis.com/calendar/v3';
 const CAL_NAME = 'Mon temps';
 let token = null, expires = 0;
@@ -79,7 +80,7 @@ export class GoogleCalendarProvider extends CalendarProvider {
       for (const e of await this.listEvents(cal.id, fromMs, toMs)) {
         if (e.transparency === 'transparent') continue;
         if ((e.attendees || []).some(a => a.self && a.responseStatus === 'declined')) continue;
-        out.push({ uid: e.id, title: e.summary || 'Événement', start: Date.parse(e.start.dateTime), end: Date.parse(e.end.dateTime), ...classify(e.colorId) });
+        out.push({ uid: e.id, title: e.summary || 'Événement', start: Date.parse(e.start.dateTime), end: Date.parse(e.end.dateTime), calId: cal.id, writable: ['owner', 'writer'].includes(cal.accessRole), ...classify(e.colorId) });
       }
     }
     return out;
@@ -91,6 +92,16 @@ export class GoogleCalendarProvider extends CalendarProvider {
     try {
       return (await this.listEvents(this.calId, fromMs, toMs)).map(e => ({ id: e.id, title: e.summary || '', start: Date.parse(e.start.dateTime), end: Date.parse(e.end.dateTime), colorId: e.colorId ?? null, mt: e.extendedProperties?.private?.mt || '' }));
     } catch (e) { if (e.status === 404 || e.status === 410) return []; throw e; }
+  }
+
+  /** Modifie un événement existant dans son calendrier d'origine. it : { summary, colorId, start, end } (minutes depuis minuit du jour s0). */
+  async patchEvent(calId, eventId, it, s0) {
+    const body = { summary: it.summary, colorId: it.colorId };
+    if (it.start != null) {
+      body.start = { dateTime: new Date(s0 + it.start * 60000).toISOString(), timeZone: tz() };
+      body.end = { dateTime: new Date(s0 + it.end * 60000).toISOString(), timeZone: tz() };
+    }
+    return api(`/calendars/${encodeURIComponent(calId)}/events/${encodeURIComponent(eventId)}`, { method: 'PATCH', body: JSON.stringify(body) });
   }
 
   /** Tous les calendriers « Mon temps » de ce compte (il peut y en avoir plusieurs si l'app a été utilisée sur plusieurs appareils). */

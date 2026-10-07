@@ -55,12 +55,15 @@ export function importEvents(events, ensureDay, st, source = 'ics') {
       const start = Math.max(0, Math.round((e.start - s0) / 60000)), end = Math.min(1440, Math.round((e.end - s0) / 60000));
       if (end <= start) continue;
       const day = ensureDay(st, key), id = `${source}:${e.uid}:${key}`, ov = (st.settings.overrides || {})[`${source}:${e.uid}`];
+      const origin = e.calId ? { gref: { c: e.calId, e: e.uid }, ...(e.writable === false ? { ro: true } : {}) } : {};   // d'où vient l'événement (pour le modifier à la source)
       day.plan = day.plan.filter(b => b.id !== id);
-      day.plan.push({ id, start, end, cat: e.cat || 'obl', ...(e.sub ? { sub: e.sub } : {}), title: e.title, fixed: true, source, ...(e.unplanned ? { unplanned: true } : {}) });
+      day.plan.push({ id, start, end, cat: e.cat || 'obl', ...(e.sub ? { sub: e.sub } : {}), title: e.title, fixed: true, source, ...origin, ...(e.unplanned ? { unplanned: true } : {}) });
       if (ov) {                                          // une correction faite dans l'app survit aux réimports
         const b = day.plan.find(x => x.id === id);
         b.cat = ov.cat; if (ov.sub) b.sub = ov.sub; else delete b.sub;
         if (ov.title) b.title = ov.title;
+        if (ov.start != null) { b.start = ov.start; b.end = ov.end; }
+        if (ov.dirty && b.gref && !b.ro) b.dirty = true;      // à renvoyer vers Google
       }
       day.plan.sort((a, b) => a.start - b.start);
       n++;
