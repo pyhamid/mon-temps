@@ -473,7 +473,7 @@ function modalStale() {
 function modalBlock(id) {
   const b = id ? get().days[ui.viewDay]?.plan.find(x => x.id === id) : null;
   openModal(b ? 'Modifier le bloc' : 'Nouvelle contrainte', `<form data-submit="block" data-id="${id || ''}">
-    ${b && IMPORTED.includes(b.source) ? `<p class="muted small">📅 Cet événement vient de Google Agenda. ${b.gref && !b.ro ? 'Au prochain <b>Envoyer</b>, il sera <b>modifié dans Google</b> (couleur, titre, heure).' : 'Son calendrier est en <b>lecture seule</b> : ta modification reste dans l\'app (statistiques) et ne change pas Google.'}</p>` : ''}
+    ${b && IMPORTED.includes(b.source) ? `<p class="muted small">📅 Cet événement vient de Google Agenda. ${!b.ro ? 'Au prochain <b>Envoyer</b>, il sera <b>modifié dans Google</b> (couleur, titre, heure).' : 'Son calendrier est en <b>lecture seule</b> : ta modification reste dans l\'app (statistiques) et ne change pas Google.'}</p>` : ''}
     <label>Titre<input type="text" name="title" value="${esc(b?.title)}" placeholder="Ex. Cours d'automatique" required></label>
     <div class="grid3"><label>De<input type="time" name="from" value="${toInput(b?.start ?? 9 * 60)}" required></label><label>À<input type="time" name="to" value="${toInput(b?.end ?? 10 * 60)}" required></label></div>
     ${catRadios(b ? subOf(b) : 'obl')}
@@ -486,7 +486,7 @@ function modalBlock(id) {
         const x = d.plan.find(p => p.id === f.id), moved = x.start !== start || x.end !== end;
         Object.assign(x, { title: f.title.trim(), start, end, ...splitCat(f.cat), sub: splitCat(f.cat).sub, fixed: true, source: IMPORTED.includes(x.source) ? x.source : 'user' });
         if (IMPORTED.includes(x.source)) {                                   // événement venu de Google : correction retenue ; renvoyée à Google au prochain envoi si le calendrier le permet
-          const toGoogle = !!x.gref && !x.ro;
+          const toGoogle = !x.ro;                                              // sans lien d'origine : l'app se reliera à Google au prochain envoi
           (st.settings.overrides ||= {})[x.id.replace(/:\d{4}-\d\d-\d\d$/, '')] = { cat: x.cat, ...(x.sub ? { sub: x.sub } : {}), title: x.title, ...(moved ? { start, end } : {}), ...(toGoogle ? { dirty: true } : {}) };
           if (toGoogle) x.dirty = true;
         }
@@ -544,24 +544,32 @@ async function syncSub(manual) {
 /** Lit Google Agenda (8 jours) et remplace les blocs importés. interactive = fenêtre Google autorisée (après un clic). */
 let gcalBusy = false;
 const BACK_DAYS = 30;                 // jours passés relus à chaque import
+/** Lit tes calendriers + « Mon temps » et met l'app à jour (sans message). Suppose qu'on est connecté. */
+async function gcalReadAll() {
+  const st = get(), today = dayKey(), fromKey = addDays(today, -BACK_DAYS), from = dayStartMs(fromKey), to = dayStartMs(addDays(today, 8));
+  const prov = new gg.GoogleCalendarProvider(st.settings.gcalId), colors = st.settings.colors;
+  const events = await prov.getEvents(from, to, classifier(colors));
+  const mirror = await prov.getMirrorEvents(from, to);
+  let changes = { updated: 0, created: 0, removed: 0 };
+  update(s => {
+    clearImported(ensureDay, s, 'gcal', fromKey, BACK_DAYS + 9);
+    importEvents(events, ensureDay, s, 'gcal');
+    changes = applyMirror(s, mirror, classifier(colors), { fromMs: from, toMs: to });
+    const n = changes.updated + changes.created + changes.removed;
+    Object.assign(s.settings, { gcalLinked: true, gcalSync: Date.now(), gcalMsg: `${events.length} événement(s) lu(s)${n ? `, ${n} modification(s) venant de « Mon temps »` : ''}` });
+  });
+  return { events, changes };
+}
+/** Des événements corrigés dans l'app ne sont pas encore reliés à leur calendrier d'origine (importés avant cette fonction) ? */
+const needsRelink = () => Object.values(get().days).some(d => d.plan.some(b => b.source === 'gcal' && !b.gref && get().settings.overrides?.[b.id.replace(/:\d{4}-\d\d-\d\d$/, '')]));
+
 async function gcalImport({ interactive = false, notify = false } = {}) {
   const st = get(), clientId = st.settings.gcalClientId;
   if (!clientId || gcalBusy) return;
   gcalBusy = true;
   try {
     if (!gg.isConnected()) await gg.connect(clientId, { silent: !interactive });
-    const today = dayKey(), fromKey = addDays(today, -BACK_DAYS), from = dayStartMs(fromKey), to = dayStartMs(addDays(today, 8));
-    const prov = new gg.GoogleCalendarProvider(st.settings.gcalId), colors = get().settings.colors;
-    const events = await prov.getEvents(from, to, classifier(colors));
-    const mirror = await prov.getMirrorEvents(from, to);
-    let changes = { updated: 0, created: 0, removed: 0 };
-    update(s => {
-      clearImported(ensureDay, s, 'gcal', fromKey, BACK_DAYS + 9);
-      importEvents(events, ensureDay, s, 'gcal');
-      changes = applyMirror(s, mirror, classifier(colors), { fromMs: from, toMs: to });
-      const n = changes.updated + changes.created + changes.removed;
-      Object.assign(s.settings, { gcalLinked: true, gcalSync: Date.now(), gcalMsg: `${events.length} événement(s) lu(s)${n ? `, ${n} modification(s) venant de « Mon temps »` : ''}` });
-    });
+    const { events, changes } = await gcalReadAll();
     ui.gcalTap = false;
     if (notify) alert(`${events.length} événement(s) lus dans tes calendriers.\nModifications faites dans « Mon temps » : ${changes.updated} mise(s) à jour, ${changes.created} ajout(s), ${changes.removed} suppression(s).`);
   } catch (e) {
@@ -597,7 +605,7 @@ async function gcalPushDay(k, prov) {
     try {
       await prov.patchEvent(b.gref.c, b.gref.e, { summary: b.title, colorId: col[b.unplanned ? 'imp' : subOf(b)], start: b.start, end: b.end }, s0);
       r.written++;
-      update(s => { const bb = s.days[k]?.plan.find(y => y.id === b.id); if (bb) delete bb.dirty; const o = s.settings.overrides?.[okey]; if (o) { delete o.dirty; delete o.start; delete o.end; } });
+      update(s => { const bb = s.days[k]?.plan.find(y => y.id === b.id); if (bb) delete bb.dirty; if (s.settings.overrides) delete s.settings.overrides[okey]; });   // Google est à jour : plus besoin de la correction locale
     } catch (e) {
       if (/insufficient|scope/i.test(e.message)) throw new Error('Permission manquante : clique sur « Se connecter à Google » et accepte la nouvelle autorisation (modifier tes événements).');
       if (e.status !== 403 && e.status !== 404) throw e;
@@ -717,7 +725,8 @@ document.addEventListener('click', e => {
     case 'color-set': update(s => { s.settings.colors[t.dataset.key] = t.dataset.id; }); break;
     case 'gcal-push': gcalRun(async () => {
       if (!gg.isConnected()) await gg.connect(st.settings.gcalClientId);
-      const prov = new gg.GoogleCalendarProvider(st.settings.gcalId);
+      if (needsRelink()) await gcalReadAll();                        // relie d'abord tes événements corrigés à leur calendrier d'origine
+      const prov = new gg.GoogleCalendarProvider(get().settings.gcalId);
       const r = await gcalPushDay(ui.viewDay, prov);
       alert(`Google Agenda — « Mon temps » : ${r.created} créé(s), ${r.updated} mis à jour, ${r.deleted} supprimé(s).${r.written ? `\nÉvénements d'origine modifiés dans Google : ${r.written}.` : ''}${r.readOnly ? `\n${r.readOnly} événement(s) dans un calendrier en lecture seule : non modifié(s) dans Google.` : ''}`);
     }); break;
@@ -730,7 +739,8 @@ document.addEventListener('click', e => {
     }); break;
     case 'gcal-push-week': gcalRun(async () => {
       if (!gg.isConnected()) await gg.connect(st.settings.gcalClientId);
-      const prov = new gg.GoogleCalendarProvider(st.settings.gcalId);
+      if (needsRelink()) await gcalReadAll();
+      const prov = new gg.GoogleCalendarProvider(get().settings.gcalId);
       let tot = { created: 0, updated: 0, deleted: 0, written: 0, readOnly: 0 };
       for (let i = 6; i >= 0; i--) { const dk = addDays(key, -i); if (!userDay(get().days[dk])) continue; const r = await gcalPushDay(dk, prov); for (const q in tot) tot[q] += r[q]; }
       alert(`7 derniers jours envoyés : ${tot.created} créé(s), ${tot.updated} mis à jour, ${tot.deleted} supprimé(s)${tot.written ? `, ${tot.written} événement(s) d'origine modifié(s)` : ''}${tot.readOnly ? `, ${tot.readOnly} en lecture seule` : ''}.`);

@@ -63,7 +63,9 @@ export function importEvents(events, ensureDay, st, source = 'ics') {
         b.cat = ov.cat; if (ov.sub) b.sub = ov.sub; else delete b.sub;
         if (ov.title) b.title = ov.title;
         if (ov.start != null) { b.start = ov.start; b.end = ov.end; }
-        if (ov.dirty && b.gref && !b.ro) b.dirty = true;      // à renvoyer vers Google
+        // différent de ce que Google contient aujourd'hui = à renvoyer vers Google (sauf calendrier en lecture seule)
+        const differs = ov.cat !== (e.cat || 'obl') || (ov.sub || '') !== (e.sub || '') || (ov.title && ov.title !== e.title) || (ov.start != null && (ov.start !== start || ov.end !== end));
+        if ((ov.dirty || differs) && b.gref && !b.ro) b.dirty = true;
       }
       day.plan.sort((a, b) => a.start - b.start);
       n++;
