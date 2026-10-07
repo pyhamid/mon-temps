@@ -14,6 +14,9 @@ export const DEFAULT_SETTINGS = {
   hardFirst: true,         // matières difficiles d'abord
   minGap: 10,              // en dessous, un trou n'est pas signalé
   gcalClientId: '257653273814-jids63mf42ut4q1d3c58929hglrbsk6q.apps.googleusercontent.com',        // identifiant client OAuth Google (public, à créer dans Google Cloud)
+  icsUrl: '',              // lien d'abonnement .ics (calendrier de l'université)
+  icsSync: 0,              // dernière synchronisation (ms)
+  icsMsg: '',              // résultat de la dernière synchronisation
   gcalId: '',              // id du calendrier "Mon temps" créé par l'app
   notif: { reminder: true, late: true, unknown: true, end: true, reorg: true, pause: true },
 };

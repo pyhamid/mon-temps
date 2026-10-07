@@ -9,7 +9,7 @@ import { CATS, PICKABLE, analyse, insights, patterns, hasData, sessionElapsed, b
 import { propose, applyProposal } from './planner.js';
 import { signals } from './signals.js';
 import { classify } from './classify.js';
-import { parseICS, importEvents, clearImported } from './calendar.js';
+import { parseICS, importEvents, clearImported, fetchICS } from './calendar.js';
 import * as gg from './google.js';
 import * as notify from './notify.js';
 
@@ -17,6 +17,7 @@ const app = document.getElementById('app'), modalEl = document.getElementById('m
 const ui = { tab: 'home', viewDay: dayKey(), modal: null };
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const catChip = c => `${CATS[c].emoji} ${CATS[c].label}`;
+const IMPORTED = ['ics', 'gcal', 'sub'];
 const nowM = () => minuteOf(Date.now(), dayKey());
 
 // ---------------------------------------------------------------- Accueil
@@ -140,7 +141,7 @@ function renderPlan() {
       const done = b.cat === 'prod' ? blockDone(st, key, b, now) : 0;
       return `<div class="block c-${b.cat}"><div class="t">${fmtHM(b.start)}<br>${fmtHM(b.end)}</div>
         <div class="grow"><b>${CATS[b.cat].emoji} ${esc(b.title)}</b>
-        <div class="muted">${b.fixed ? (b.source === 'ics' || b.source === 'gcal' ? 'calendrier' : 'contrainte') : 'proposé'}${done > 0 ? ` · fait ${fmtDur(done)}` : ''}</div></div>
+        <div class="muted">${b.fixed ? (IMPORTED.includes(b.source) ? 'calendrier' : 'contrainte') : 'proposé'}${done > 0 ? ` · fait ${fmtDur(done)}` : ''}</div></div>
         <div class="row tight">${!past && b.cat === 'prod' && key === dayKey() ? `<button class="btn small" data-act="start-block" data-id="${b.id}">▶</button>` : ''}
         <button class="btn small" data-act="block-edit" data-id="${b.id}">✎</button></div></div>`;
     }).join('') : '<p class="muted">Planning vide.</p>'}
@@ -242,6 +243,11 @@ function renderSettings() {
     ${chk('reminder', 'Rappel de début d\'activité')}${chk('late', 'Retard')}${chk('unknown', 'Temps non identifié')}
     ${chk('end', 'Fin de session')}${chk('pause', 'Pause plus longue que prévu')}${chk('reorg', 'Réorganisation')}
     <p class="muted small">Sans serveur, les notifications partent tant que l'app est ouverte ou en arrière-plan. Aucune surveillance des autres applications.</p></section>
+    <section class="card"><h2>📅 Abonnement au calendrier</h2>
+    <p class="muted">Colle le lien d'abonnement de l'université (.ics ou webcal://). L'app le relit toute seule toutes les 30 minutes quand elle est ouverte : cours déplacés, ajoutés ou supprimés sont mis à jour.</p>
+    <label>Lien d'abonnement<input type="text" data-setting="icsUrl" value="${esc(s.icsUrl)}" placeholder="https://… ou webcal://…" autocomplete="off" spellcheck="false"></label>
+    <div class="row"><button class="btn primary" data-act="ics-sync" ${s.icsUrl ? '' : 'disabled'}>Synchroniser maintenant</button></div>
+    ${s.icsSync ? `<p class="muted small">Dernière synchronisation : ${new Date(s.icsSync).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · ${esc(s.icsMsg)}</p>` : ''}</section>
     <section class="card"><h2>Google Agenda</h2>
     <p class="muted">Lecture de tes événements (cours, rendez-vous…) comme contraintes ; envoi des sessions de productivité dans un calendrier séparé « Mon temps », seulement quand tu le demandes.</p>
     <label>Identifiant client Google <span class="small">(voir LISEZMOI)</span><input type="text" data-setting="gcalClientId" value="${esc(s.gcalClientId)}" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false"></label>
@@ -355,7 +361,7 @@ function modalBlock(id) {
     if (end <= start) return alert('L\'heure de fin doit être après le début.');
     update(st => {
       const d = ensureDay(st, ui.viewDay);
-      if (f.id) { const x = d.plan.find(p => p.id === f.id); Object.assign(x, { title: f.title.trim(), start, end, cat: f.cat, fixed: true, source: x.source === 'ics' || x.source === 'gcal' ? x.source : 'user' }); }
+      if (f.id) { const x = d.plan.find(p => p.id === f.id); Object.assign(x, { title: f.title.trim(), start, end, cat: f.cat, fixed: true, source: IMPORTED.includes(x.source) ? x.source : 'user' }); }
       else d.plan.push({ id: uid(), title: f.title.trim(), start, end, cat: f.cat, fixed: true, source: 'user' });
       d.plan.sort((p, q) => p.start - q.start);
     });
@@ -382,6 +388,30 @@ function modalPlanGen() {
 }
 
 // ------------------------------------------------------------ Événements
+let syncing = false;
+/** Relit le calendrier d'abonnement et remplace les blocs importés à partir d'aujourd'hui. */
+async function syncSub(manual) {
+  const url = get().settings.icsUrl;
+  if (!url || syncing) return;
+  syncing = true;
+  try {
+    const events = await fetchICS(url), key = dayKey();
+    update(s => {
+      clearImported(ensureDay, s, 'sub', key, 61);
+      const n = importEvents(events.filter(e => e.end > Date.now() - 3600000), ensureDay, s, 'sub');
+      s.settings.icsSync = Date.now(); s.settings.icsMsg = `${events.length} événement(s) lu(s)`;
+    });
+    if (manual) alert('Calendrier synchronisé.');
+  } catch (e) {
+    const blocked = e instanceof TypeError;
+    const msg = blocked
+      ? 'Lecture impossible : le site de l\'université n\'autorise pas la lecture directe depuis un navigateur. Abonne-toi plutôt dans Google Agenda (Autres agendas, puis À partir de l\'URL), puis utilise « Importer les 7 prochains jours ».'
+      : `Lecture impossible : ${e.message}.`;
+    update(s => { s.settings.icsSync = Date.now(); s.settings.icsMsg = msg; });
+    if (manual) alert(msg);
+  } finally { syncing = false; }
+}
+
 async function gcalRun(fn) {
   try { await fn(); } catch (e) { alert(e.message); }
 }
@@ -482,6 +512,7 @@ document.addEventListener('click', e => {
       update(s => applyProposal(ensureDay(s, k), p));
       closeModal(); break;
     }
+    case 'ics-sync': syncSub(true); break;
     case 'gcal-connect': gcalRun(async () => { await gg.connect(st.settings.gcalClientId); render(); }); break;
     case 'gcal-import': gcalRun(async () => {
       if (!gg.isConnected()) await gg.connect(st.settings.gcalClientId);
@@ -541,9 +572,11 @@ modalEl.addEventListener('click', e => { if (e.target === modalEl) closeModal();
 subscribe(() => { if (!ui.modal) render(); });
 const typing = () => /INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName || '');
 setInterval(tick, 1000);
-setInterval(() => { notify.check(); if (!ui.modal && !typing() && !document.hidden) render(); }, 30000);
+const subDue = () => { const st = get().settings; return st.icsUrl && Date.now() - st.icsSync > 30 * 60000; };
+setInterval(() => { if (subDue()) syncSub(false); notify.check(); if (!ui.modal && !typing() && !document.hidden) render(); }, 30000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { notify.check(); if (!ui.modal) render(); } });
 if (get().settings.gcalClientId) gg.preload();
+if (subDue()) syncSub(false);
 render();
 notify.check();
 

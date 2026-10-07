@@ -72,3 +72,13 @@ export function clearImported(ensureDay, st, source, fromKey, days) {
     if (d) d.plan = d.plan.filter(b => b.source !== source);
   }
 }
+
+/** Lit un lien d'abonnement .ics (https:// ou webcal://). Échoue si le serveur n'autorise pas la lecture depuis un navigateur (CORS). */
+export async function fetchICS(url) {
+  const u = url.trim().replace(/^webcal:/i, 'https:');
+  const r = await fetch(u, { cache: 'no-store' });
+  if (!r.ok) throw new Error(`le serveur répond ${r.status}`);
+  const text = await r.text();
+  if (!text.includes('BEGIN:VCALENDAR')) throw new Error('ce lien ne contient pas de calendrier');
+  return parseICS(text);
+}
