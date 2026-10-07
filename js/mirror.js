@@ -16,6 +16,9 @@ const isLogItem = i => i.startsWith('log:') || i.startsWith('imp:');
  * @returns         { updated, created, removed }
  */
 export function applyMirror(st, events, classify, { fromMs, toMs, uid }) {
+  // événements que tu as supprimés dans l'app : on ne les réapprend pas (ils seront supprimés dans Google au prochain envoi)
+  const dead = new Set(st.settings?.tombstones || []);
+  events = events.filter(e => !dead.has(e.id));
   const stat = { updated: 0, created: 0, removed: 0 };
   // une correction faite dans l'app APRÈS la dernière modification dans Google l'emporte (elle sera envoyée au prochain « Envoyer »)
   const appWins = (item, e) => !!item.editedAt && item.editedAt > (e.updated ?? Infinity);

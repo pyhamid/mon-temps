@@ -104,6 +104,12 @@ export class GoogleCalendarProvider extends CalendarProvider {
     return api(`/calendars/${encodeURIComponent(calId)}/events/${encodeURIComponent(eventId)}`, { method: 'PATCH', body: JSON.stringify(body) });
   }
 
+  /** Supprime un événement (déjà absent = réussi). */
+  async deleteEvent(calId, eventId) {
+    try { await api(`/calendars/${encodeURIComponent(calId)}/events/${encodeURIComponent(eventId)}`, { method: 'DELETE' }); }
+    catch (e) { if (e.status !== 404 && e.status !== 410) throw e; }
+  }
+
   /** Tous les calendriers « Mon temps » de ce compte (il peut y en avoir plusieurs si l'app a été utilisée sur plusieurs appareils). */
   async findCalendars() {
     const list = await api('/users/me/calendarList?minAccessRole=owner');

@@ -19,6 +19,7 @@ export const DEFAULT_SETTINGS = {
   icsSync: 0,              // dernière synchronisation (ms)
   icsMsg: '',              // résultat de la dernière synchronisation
   gcalId: '',
+  tombstones: [],          // événements Google supprimés dans l'app, à supprimer aussi dans Google au prochain envoi
   overrides: {},           // corrections faites dans l'app sur des événements venant de Google : { 'gcal:ID': {cat, sub?, title} }
   recurring: [],           // objectifs répétés du lundi au vendredi : {id,title,target,hard}
   lastBackup: 0,           // dernière sauvegarde exportée (ms)

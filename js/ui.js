@@ -279,6 +279,7 @@ function renderSettingsRaw() {
     ${COLOR_KEYS.map(k => `<div class="cc"><div class="ccl">${COLOR_META[k].emoji} ${COLOR_META[k].label}${COLOR_META[k].hint ? `<small>${COLOR_META[k].hint}</small>` : ''}</div>
       <div class="sw">${GOOGLE_COLORS.map(c => `<button type="button" class="swatch ${s.colors[k] === c.id ? 'on' : ''}" style="background:${c.hex}" data-act="color-set" data-key="${k}" data-id="${c.id}" aria-label="${c.name}" title="${c.name}"></button>`).join('')}</div>
       <span class="muted small">${nameOf(s.colors[k])}</span></div>`).join('')}
+    <p class="muted small">Dans Google, survole les pastilles pour voir leur nom : seules ces 11 couleurs sont reconnues (Tomate, Flamant, Mandarine, Banane, Sauge, Basilic, Paon, Myrtille, Lavande, Raisin, Graphite). Les autres teintes sont traitées comme « sans couleur ».</p>
     ${duplicates(s.colors).length ? `<p class="warn">⚠️ ${duplicates(s.colors).map(([x, y]) => `${COLOR_META[x].label} et ${COLOR_META[y].label}`).join(' ; ')} ont la même couleur : Google ne pourra pas les distinguer.</p>` : ''}</section>
     <section class="card"><h2>Google Agenda</h2>
     <p class="muted">Lecture de tes événements (cours, rendez-vous…) comme contraintes ; envoi des sessions de productivité dans un calendrier séparé « Mon temps », seulement quand tu le demandes.</p>
@@ -629,6 +630,12 @@ async function gcalWriteBack(prov) {
       }
     }
   }
+  for (const evId of [...(get().settings.tombstones || [])]) {   // activités venues de Google supprimées dans l'app
+    const calId = get().settings.gcalId;
+    if (calId) await prov.deleteEvent(calId, evId);
+    update(s => { s.settings.tombstones = (s.settings.tombstones || []).filter(x => x !== evId); });
+    out.written++;
+  }
   for (const [k, day] of Object.entries(get().days)) {           // activités créées dans Google (calendrier « Mon temps ») puis corrigées dans l'app
     for (const e of day.log.filter(x => x.dirty && x.id.startsWith('g:'))) {
       try {
@@ -697,7 +704,10 @@ document.addEventListener('click', e => {
     case 'unplanned': modalEntry({ unplanned: true }); break;
     case 'entry-open': modalEntry(); break;
     case 'entry-edit': modalEntryEdit(id); break;
-    case 'entry-del': update(s => { const d = s.days[ui.viewDay]; if (d) d.log = d.log.filter(x => x.id !== id); }); if (ui.modal) closeModal(); break;
+    case 'entry-del': update(s => {
+      const d = s.days[ui.viewDay];
+      if (d) { if (id.startsWith('g:')) (s.settings.tombstones ||= []).push(id.slice(2)); d.log = d.log.filter(x => x.id !== id); }   // venue de Google : sera aussi supprimée dans Google
+    }); if (ui.modal) closeModal(); break;
     case 'gap': {
       modalEntry({ gap: t.dataset.ref || t.dataset.id });
       const form = modalEl.querySelector('form'), input = form.querySelector('input[name=title]');
