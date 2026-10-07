@@ -62,18 +62,20 @@ export function applyMirror(st, events, classify, { fromMs, toMs, uid }) {
     return en;
   };
 
+  // activité qui n'existe que dans Google (créée à la main, ou envoyée par un autre appareil) : on l'apprend / on la met à jour
+  const learn = (e, k) => {
+    const loc = locate(`g:${e.id}`);
+    if (loc) { if (!appWins(loc.en, e) && !same(loc.en, e, k)) { apply(loc.en, e, k); rehome(loc); stat.updated++; } }
+    else { newEntry(e, k, `g:${e.id}`); stat.created++; }
+  };
   for (const e of events) {
     const k = kind(e), r = rev[e.id];
-    if (!r) {                                            // créé à la main dans « Mon temps » (ou déjà détaché)
-      const loc = locate(`g:${e.id}`);
-      if (loc) { if (!appWins(loc.en, e) && !same(loc.en, e, k)) { apply(loc.en, e, k); rehome(loc); stat.updated++; } }
-      else { newEntry(e, k, `g:${e.id}`); stat.created++; }
-      continue;
-    }
+    if (!r) { learn(e, k); continue; }
     const d = st.days[r.dk] || ensure(r.dk), item = r.item;
     if (isLogItem(item)) {
       const loc = locate(item.replace(/^(log|imp):/, ''));
-      if (loc && !appWins(loc.en, e) && !same(loc.en, e, k)) { apply(loc.en, e, k); rehome(loc); stat.updated++; }
+      if (!loc) { if (k.cat !== 'unk') learn(e, k); }      // envoyée par un autre appareil
+      else if (!appWins(loc.en, e) && !same(loc.en, e, k)) { apply(loc.en, e, k); rehome(loc); stat.updated++; }
     } else if (item.startsWith('lost:')) {              // « je ne sais plus » : recolorié = identifié
       const loc = locate(item.slice(5));
       if (loc && k.cat !== 'unk') { apply(loc.en, e, k); rehome(loc); delete d.gcal[item]; stat.updated++; }

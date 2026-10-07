@@ -169,8 +169,10 @@ export class GoogleCalendarProvider extends CalendarProvider {
       out[it.id] = first.id;
       for (const d of dups) await del(d);                  // doublons
     }
-    for (const [mt, list] of groups)                       // supprimé dans l'app = supprimé dans Google
-      if (!want.has(mt) && mt.startsWith(`${key}|`)) for (const e of list) if (!keepSet.has(e.id)) await del(e);
+    // Supprimé dans l'app = supprimé dans Google, mais SEULEMENT ce que cet appareil a lui-même envoyé (map).
+    // Les événements envoyés par un autre appareil (autres données locales) ne sont jamais touchés.
+    for (const [mt, list] of groups)
+      if (!want.has(mt) && mt.startsWith(`${key}|`) && Object.hasOwn(map, mt.slice(key.length + 1))) for (const e of list) if (!keepSet.has(e.id)) await del(e);
     return { map: out, calId, ...n };
   }
 
