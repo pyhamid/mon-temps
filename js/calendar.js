@@ -56,7 +56,7 @@ export function importEvents(events, ensureDay, st, source = 'ics') {
       if (end <= start) continue;
       const day = ensureDay(st, key), id = `${source}:${e.uid}:${key}`;
       day.plan = day.plan.filter(b => b.id !== id);
-      day.plan.push({ id, start, end, cat: e.cat || 'obl', title: e.title, fixed: true, source, ...(e.unplanned ? { unplanned: true } : {}), ...(e.sub ? { sub: e.sub } : {}) });
+      day.plan.push({ id, start, end, ...(e.cat ? { cat: e.cat, ...(e.sub ? { sub: e.sub } : {}) } : { cat: 'prod', sub: 'trav' }), title: e.title, fixed: true, source, ...(e.unplanned ? { unplanned: true } : {}) });
       day.plan.sort((a, b) => a.start - b.start);
       n++;
     }

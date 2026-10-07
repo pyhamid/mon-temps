@@ -53,26 +53,44 @@ async function api(path, opt = {}) {
 export class GoogleCalendarProvider extends CalendarProvider {
   constructor(calId) { super(); this.calId = calId; }
 
-  /** Événements de tous tes calendriers (sauf "Mon temps") entre deux dates (ms). */
+  /** Événements d'un calendrier entre deux dates (ms), tels que renvoyés par Google (événements ponctuels, sans les journées entières). */
+  async listEvents(calId, fromMs, toMs) {
+    const out = [];
+    let pageToken = '';
+    for (let i = 0; i < 8; i++) {
+      const q = new URLSearchParams({ timeMin: new Date(fromMs).toISOString(), timeMax: new Date(toMs).toISOString(), singleEvents: 'true', orderBy: 'startTime', maxResults: '250' });
+      if (pageToken) q.set('pageToken', pageToken);
+      const res = await api(`/calendars/${encodeURIComponent(calId)}/events?${q}`);
+      for (const e of res.items || []) {
+        if (e.status === 'cancelled' || !e.start?.dateTime) continue;
+        out.push(e);
+      }
+      if (!(pageToken = res.nextPageToken)) break;
+    }
+    return out;
+  }
+
+  /** Événements de tous tes calendriers (sauf « Mon temps ») entre deux dates (ms). */
   async getEvents(fromMs, toMs, classify = () => ({})) {
     const list = await api('/users/me/calendarList?minAccessRole=reader');
     const out = [];
     for (const cal of list.items) {
       if (cal.id === this.calId || cal.selected === false) continue;
-      let pageToken = '';
-      for (let i = 0; i < 4; i++) {
-        const q = new URLSearchParams({ timeMin: new Date(fromMs).toISOString(), timeMax: new Date(toMs).toISOString(), singleEvents: 'true', orderBy: 'startTime', maxResults: '250' });
-        if (pageToken) q.set('pageToken', pageToken);
-        const res = await api(`/calendars/${encodeURIComponent(cal.id)}/events?${q}`);
-        for (const e of res.items || []) {
-          if (e.status === 'cancelled' || !e.start?.dateTime || e.transparency === 'transparent') continue;
-          if ((e.attendees || []).some(a => a.self && a.responseStatus === 'declined')) continue;
-          out.push({ uid: e.id, title: e.summary || 'Événement', start: Date.parse(e.start.dateTime), end: Date.parse(e.end.dateTime), ...classify(e.colorId) });
-        }
-        if (!(pageToken = res.nextPageToken)) break;
+      for (const e of await this.listEvents(cal.id, fromMs, toMs)) {
+        if (e.transparency === 'transparent') continue;
+        if ((e.attendees || []).some(a => a.self && a.responseStatus === 'declined')) continue;
+        out.push({ uid: e.id, title: e.summary || 'Événement', start: Date.parse(e.start.dateTime), end: Date.parse(e.end.dateTime), ...classify(e.colorId) });
       }
     }
     return out;
+  }
+
+  /** Événements du calendrier « Mon temps » (le miroir de l'app), avec leur couleur. */
+  async getMirrorEvents(fromMs, toMs) {
+    if (!this.calId) return [];
+    try {
+      return (await this.listEvents(this.calId, fromMs, toMs)).map(e => ({ id: e.id, title: e.summary || '', start: Date.parse(e.start.dateTime), end: Date.parse(e.end.dateTime), colorId: e.colorId ?? null }));
+    } catch (e) { if (e.status === 404 || e.status === 410) return []; throw e; }
   }
 
   /** Retourne l'id du calendrier "Mon temps" (le crée s'il n'existe pas). */

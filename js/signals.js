@@ -33,7 +33,7 @@ export function signals(state, nowMs = Date.now()) {
   // Rappels de début et retards (uniquement si rien de productif n'est en cours)
   if (!cur || cur.cat === 'pause') {
     for (const b of day.plan) {
-      if (b.cat !== 'prod' || b.end <= nowM) continue;
+      if (b.cat !== 'prod' || b.end <= nowM || (b.fixed && b.sub === 'trav')) continue;
       const started = blockDone(state, key, b, nowMs) > 0;
       if (started) continue;
       if (nowM >= b.start && nowM < b.start + 10)
