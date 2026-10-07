@@ -1,7 +1,7 @@
 :root {
   --bg: #f6f7fb; --card: #fff; --text: #1d2033; --muted: #6b7088; --line: #e4e6ef; --accent: #4f46e5; --accent-t: #fff;
   --warn: #b45309; --danger: #b91c1c;
-  --c-prod: #4f46e5; --c-obl: #dc2626; --c-vie: #0d9488; --c-pause: #16a34a; --c-loisir: #d97706; --c-unk: #94a3b8;
+  --c-prod: #4f46e5; --c-obl: #dc2626; --c-vie: #0d9488; --c-pause: #16a34a; --c-loisir: #d97706; --c-unk: #94a3b8; --c-imp: #f4511e;
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg: #11131c; --card: #1b1e2c; --text: #eceef7; --muted: #9aa0ba; --line: #2b2f42; --accent: #818cf8; --accent-t: #11131c; --warn: #fbbf24; --danger: #f87171;
@@ -124,3 +124,11 @@ h1 { font-size: 1.05rem; }
 
 .lk-rem { display: flex; gap: 8px; align-items: center; justify-content: center; margin: 14px 0 0; font-size: .85rem; color: var(--muted); }
 .lk-rem input { width: 18px; height: 18px; }
+
+.c-imp .bar i { background: var(--c-imp); }
+.cc { padding: 10px 0; border-top: 1px solid var(--line); } .cc:first-of-type { border-top: 0; }
+.ccl { font-weight: 600; } .ccl small { display: block; font-weight: 400; color: var(--muted); font-size: .8rem; }
+.sw { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 2px; }
+.swatch { width: 34px; height: 34px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
+.swatch.on { border-color: var(--text); box-shadow: 0 0 0 2px var(--card) inset; }
+.swatch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

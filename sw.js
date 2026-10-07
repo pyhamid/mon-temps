@@ -1,7 +1,7 @@
 // Service worker : l'app fonctionne hors ligne (cache d'abord, mise à jour en arrière-plan).
-const V = 'temps-v4';
+const V = 'temps-v5';
 const ASSETS = ['./', 'index.html', 'style.css', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png',
-  'js/ui.js', 'js/store.js', 'js/time.js', 'js/analysis.js', 'js/planner.js', 'js/signals.js', 'js/notify.js', 'js/calendar.js', 'js/classify.js', 'js/google.js', 'js/lock.js', 'js/main.js'];
+  'js/ui.js', 'js/store.js', 'js/time.js', 'js/analysis.js', 'js/planner.js', 'js/signals.js', 'js/notify.js', 'js/calendar.js', 'js/classify.js', 'js/google.js', 'js/lock.js', 'js/colors.js', 'js/main.js'];
 
 self.addEventListener('install', e => { e.waitUntil(caches.open(V).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => {
