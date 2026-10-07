@@ -5,13 +5,15 @@ export const CATS = {
   sleep:  { emoji: '😴', label: 'Sommeil' },
   obl:    { emoji: '🔴', label: 'Obligations' },
   vie:    { emoji: '🧹', label: 'Vie quotidienne' },
-  prod:   { emoji: '📚', label: 'Productivité' },
+  prod:   { emoji: '🎯', label: 'Productivité' },
+  etu:    { emoji: '📚', label: 'Études' },
+  trav:   { emoji: '💼', label: 'Travail' },
   pause:  { emoji: '🌿', label: 'Pause / repos' },
   loisir: { emoji: '🎮', label: 'Divertissement volontaire' },
   unk:    { emoji: '❓', label: 'Non identifié' },
   imp:    { emoji: '⚡', label: 'Imprévus' },
 };
-export const PICKABLE = ['prod', 'obl', 'vie', 'pause', 'loisir'];
+export const PICKABLE = ['etu', 'trav', 'obl', 'vie', 'pause', 'loisir'];
 
 const EMPTY = { goals: [], plan: [], log: [] };
 
@@ -83,7 +85,7 @@ export function analyse(state, key, nowMs = Date.now()) {
   const unconfirmed = state.days[key]?.wakeActual == null && key === dayKey(new Date(nowMs));
   const upto = unconfirmed ? wake : Math.max(wake, Math.min(minuteOf(nowMs, key), bed));
   const fixed = new Array(1440).fill(null), arr = new Array(1440).fill(null), lost = new Array(1440).fill(false);
-  const fixedLost = new Array(1440).fill(false), impArr = new Array(1440).fill(false);
+  const fixedLost = new Array(1440).fill(false), impArr = new Array(1440).fill(false), subArr = new Array(1440).fill('etu');
 
   // blocs fixes (cours, imprévus, temps perdu… venant du calendrier ou saisis à la main)
   for (const b of day.plan)
@@ -92,6 +94,7 @@ export function analyse(state, key, nowMs = Date.now()) {
         fixed[m] = b.cat;
         if (b.cat === 'unk') fixedLost[m] = true;
         if (b.unplanned) impArr[m] = true;
+        if (b.sub) subArr[m] = b.sub;
       }
   // blocs fixes déjà passés : supposés réalisés (le journal les remplace si besoin)
   for (let m = 0; m < upto; m++) { arr[m] = fixed[m]; if (fixedLost[m]) lost[m] = true; }
@@ -100,7 +103,7 @@ export function analyse(state, key, nowMs = Date.now()) {
   const pauseOver = [];
   for (const e of entriesOf(state, key, nowMs)) {
     const a = Math.max(0, Math.round((e.start - s0) / 60000)), z = Math.min(1440, Math.round((e.end - s0) / 60000));
-    for (let m = a; m < z; m++) { arr[m] = e.cat; lost[m] = !!e.dontKnow; impArr[m] = !!e.unplanned; }
+    for (let m = a; m < z; m++) { arr[m] = e.cat; lost[m] = !!e.dontKnow; impArr[m] = !!e.unplanned; subArr[m] = e.sub || 'etu'; }
     const dur = (e.end - e.start) / 60000;
     if (e.cat === 'pause' && e.plannedMin && !e.open && dur > e.plannedMin + 10 && a >= 0 && a < 1440)
       pauseOver.push({ planned: e.plannedMin, actual: dur });
@@ -108,6 +111,7 @@ export function analyse(state, key, nowMs = Date.now()) {
 
   const cat = { prod: 0, obl: 0, vie: 0, pause: 0, loisir: 0, unk: 0 };
   let unkPending = 0, unkLost = 0, impMin = 0, gapStart = null;
+  const sub = { etu: 0, trav: 0 };
   const gaps = [], part = { am: { prod: 0, avail: 0 }, pm: { prod: 0, avail: 0 } };
   const closeGap = m => {
     if (gapStart != null && m - gapStart >= state.settings.minGap) gaps.push({ start: gapStart, end: m });
@@ -120,7 +124,7 @@ export function analyse(state, key, nowMs = Date.now()) {
     else {
       closeGap(m);
       if (c === 'unk') { cat.unk++; if (lost[m]) unkLost++; else unkPending++; }
-      else if (c in cat) cat[c]++;
+      else if (c in cat) { cat[c]++; if (c === 'prod') sub[subArr[m]] = (sub[subArr[m]] || 0) + 1; }
     }
     if (c !== 'obl' && c !== 'vie') {
       const p = m < 720 ? part.am : part.pm;
@@ -156,7 +160,7 @@ export function analyse(state, key, nowMs = Date.now()) {
   const target = active.reduce((a, g) => a + g.target, 0);
 
   return {
-    wake, bed, upto, awake, cat, gaps, lostSegs, pauseOver, unplanned: impMin, goals, target, part,
+    wake, bed, upto, awake, cat, gaps, lostSegs, pauseOver, sub, unplanned: impMin, goals, target, part,
     unkPending, unkLost, availSoFar, availTotal,
     availRemaining: Math.max(0, availTotal - used),
     sleepMin: wake + 1440 - Math.min(state.days[key]?.sleepPlanned ?? state.settings.bed, 1440),
@@ -168,8 +172,8 @@ export function insights(a) {
   const out = [];
   const p = a.cat.prod;
   if (a.target > 0) {
-    out.push(`Tu as travaillé ${fmtDur(p)} aujourd'hui. Ton objectif était de ${fmtDur(a.target)}. Objectif atteint à ${Math.round(p / a.target * 100)} %.`);
-  } else if (p > 0) out.push(`Tu as travaillé ${fmtDur(p)} (aucun objectif fixé ce jour-là).`);
+    out.push(`Tu as été productif ${fmtDur(p)} aujourd'hui${a.sub.trav ? ` (études ${fmtDur(a.sub.etu)}, travail ${fmtDur(a.sub.trav)})` : ''}. Ton objectif était de ${fmtDur(a.target)}. Objectif atteint à ${Math.round(p / a.target * 100)} %.`);
+  } else if (p > 0) out.push(`Tu as été productif ${fmtDur(p)}${a.sub.trav ? ` (études ${fmtDur(a.sub.etu)}, travail ${fmtDur(a.sub.trav)})` : ''} (aucun objectif fixé ce jour-là).`);
   if (a.availSoFar > 0)
     out.push(`Tu avais ${fmtDur(a.availSoFar)} de temps réellement disponible. Productivité : ${fmtDur(p)}. Repos / divertissement volontaire : ${fmtDur(a.cat.pause + a.cat.loisir)}. Temps non identifié : ${fmtDur(a.cat.unk)}.`);
   for (const o of a.pauseOver)

@@ -1,7 +1,7 @@
 // État de l'application, persisté dans localStorage.
 // Pour passer plus tard à une base cloud : remplacer load()/save() uniquement.
 import { uid } from './time.js';
-import { DEFAULT_COLORS } from './colors.js';
+import { DEFAULT_COLORS, mergeColors } from './colors.js';
 
 const KEY = 'temps-v1';
 
@@ -37,7 +37,7 @@ function load() {
   try {
     const s = JSON.parse(localStorage.getItem(KEY));
     if (s && s.v === 1) {
-      s.settings = { ...DEFAULT_SETTINGS, ...s.settings, notif: { ...DEFAULT_SETTINGS.notif, ...(s.settings || {}).notif }, colors: { ...DEFAULT_COLORS, ...(s.settings || {}).colors } };
+      s.settings = { ...DEFAULT_SETTINGS, ...s.settings, notif: { ...DEFAULT_SETTINGS.notif, ...(s.settings || {}).notif }, colors: mergeColors((s.settings || {}).colors) };
       s.days ||= {}; s.notified ||= {};
       return s;
     }
@@ -75,7 +75,7 @@ export function importJSON(text) {
   const s = JSON.parse(text);
   if (!s || s.v !== 1 || typeof s.days !== 'object') throw new Error('Fichier de sauvegarde invalide');
   state = s;
-  state.settings = { ...DEFAULT_SETTINGS, ...s.settings, notif: { ...DEFAULT_SETTINGS.notif, ...(s.settings || {}).notif }, colors: { ...DEFAULT_COLORS, ...(s.settings || {}).colors } };
+  state.settings = { ...DEFAULT_SETTINGS, ...s.settings, notif: { ...DEFAULT_SETTINGS.notif, ...(s.settings || {}).notif }, colors: mergeColors((s.settings || {}).colors) };
   save();
   listeners.forEach(f => f());
 }
@@ -101,7 +101,7 @@ function closeCurrent(st, now) {
   st.current = null;
 }
 
-export function startActivity({ cat, title, goalId = null, plannedMin = null }) {
+export function startActivity({ cat, title, goalId = null, plannedMin = null, sub = null }) {
   update(st => {
     const now = Date.now();
     // Si le réveil n'a pas été indiqué, le premier chrono fait foi (évite de compter la matinée comme « non identifiée »).
@@ -110,8 +110,9 @@ export function startActivity({ cat, title, goalId = null, plannedMin = null }) 
     if (day.wakeActual == null && m >= (day.wakePlanned ?? st.settings.wake)) day.wakeActual = m;
     closeCurrent(st, now);
     const sid = uid();
-    st.session = { id: sid, cat, title, goalId };
-    st.current = { id: uid(), sid, cat, title, goalId, start: now, plannedMin: cat === 'pause' ? plannedMin : null };
+    const kind = cat === 'prod' ? (sub || 'etu') : null;
+    st.session = { id: sid, cat, title, goalId, sub: kind };
+    st.current = { id: uid(), sid, cat, title, goalId, sub: kind, start: now, plannedMin: cat === 'pause' ? plannedMin : null };
   });
 }
 
@@ -129,7 +130,7 @@ export function resumeSession() {
     if (!st.session) return;
     const now = Date.now(), s = st.session;
     closeCurrent(st, now);
-    st.current = { id: uid(), sid: s.id, cat: s.cat, title: s.title, goalId: s.goalId, start: now, plannedMin: null };
+    st.current = { id: uid(), sid: s.id, cat: s.cat, title: s.title, goalId: s.goalId, sub: s.sub || null, start: now, plannedMin: null };
   });
 }
 

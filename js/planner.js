@@ -75,7 +75,7 @@ export function propose(state, key, nowMs = Date.now()) {
         : (avail >= MIN_SPLIT && c.min - avail >= 20 ? Math.floor(avail / 5) * 5 : 0);
       if (!len) break;
       if (gap) add.push({ id: uid(), start: cur, end: start, cat: 'pause', title: 'Pause', fixed: false, source: 'auto' });
-      add.push({ id: uid(), start, end: start + len, cat: 'prod', title: c.goal.title, goalId: c.goal.id, fixed: false, source: 'auto' });
+      add.push({ id: uid(), start, end: start + len, cat: 'prod', title: c.goal.title, goalId: c.goal.id, sub: c.goal.sub || 'etu', fixed: false, source: 'auto' });
       c.min -= len;
       if (c.min < 15) queue.shift();
       cur = start + len; lastLen = len;
