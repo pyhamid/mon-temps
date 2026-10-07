@@ -20,11 +20,11 @@ export const GOOGLE_COLORS = [
 export const COLOR_KEYS = ['obl', 'imp', 'lost', 'etu', 'trav', 'pause', 'vie', 'loisir'];
 
 export const COLOR_META = {
-  obl:    { emoji: '🔴', label: 'Obligations', hint: 'Rendez-vous, transport, démarches' },
+  obl:    { emoji: '🔴', label: 'Obligations', hint: 'Cours à l\'université (calendrier importé), rendez-vous, transport' },
   imp:    { emoji: '⚡', label: 'Imprévus', hint: 'Ce qui n\'était pas prévu' },
   lost:   { emoji: '⬛', label: 'Temps perdu', hint: 'Temps passé à ne rien faire / non identifié' },
   etu:    { emoji: '📚', label: 'Études', hint: 'Cours à réviser, exercices, projets d\'école' },
-  trav:   { emoji: '💼', label: 'Travail (cours inclus)', hint: 'Cours à l\'université et travail. Couleur par défaut des événements importés.' },
+  trav:   { emoji: '💼', label: 'Travail', hint: 'Ton travail / job' },
   pause:  { emoji: '🌿', label: 'Pause / repos', hint: '' },
   vie:    { emoji: '🧹', label: 'Vie quotidienne', hint: 'Repas, ménage, courses…' },
   loisir: { emoji: '🎮', label: 'Divertissement', hint: 'Loisir choisi' },
@@ -53,8 +53,8 @@ export function duplicates(colors) {
   return dup;
 }
 
-/** colorId Google (ou rien) → { cat, sub?, unplanned? } utilisable dans le planning. Sans couleur (ou couleur inconnue) : travail, cours inclus. */
+/** colorId Google (ou rien) → { cat, sub?, unplanned? } utilisable dans le planning. Sans couleur (ou couleur inconnue) : obligation (tes cours universitaires). */
 export function classifier(colors) {
   const kinds = { obl: { cat: 'obl' }, imp: { cat: 'obl', unplanned: true }, lost: { cat: 'unk' }, etu: { cat: 'prod', sub: 'etu' }, trav: { cat: 'prod', sub: 'trav' }, pause: { cat: 'pause' }, vie: { cat: 'vie' }, loisir: { cat: 'loisir' } };
-  return id => kinds[id == null ? 'trav' : COLOR_KEYS.find(k => colors[k] === String(id))] || kinds.trav;
+  return id => kinds[id == null ? 'obl' : COLOR_KEYS.find(k => colors[k] === String(id))] || kinds.obl;
 }

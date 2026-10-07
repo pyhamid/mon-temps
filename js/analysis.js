@@ -183,7 +183,7 @@ export function insights(a) {
     out.push(`Tu as été productif ${fmtDur(p)} aujourd'hui (chronométré). Sur tes objectifs, tu as fait ${fmtDur(a.goalDone)} sur ${fmtDur(a.target)} : atteint à ${Math.round(a.goalDone / a.target * 100)} %.`);
   } else if (p > 0) out.push(`Tu as été productif ${fmtDur(p)} aujourd'hui (aucun objectif fixé ce jour-là).`);
   if (a.availSoFar > 0)
-    out.push(`Tu avais ${fmtDur(a.availSoFar)} de temps réellement disponible (hors cours, travail, obligations et vie quotidienne). Études : ${fmtDur(a.sub.etu)}. Repos / divertissement volontaire : ${fmtDur(a.cat.pause + a.cat.loisir)}. Temps non identifié : ${fmtDur(a.cat.unk)}.`);
+    out.push(`Tu avais ${fmtDur(a.availSoFar)} de temps réellement disponible (hors obligations, travail et vie quotidienne). Études : ${fmtDur(a.sub.etu)}. Repos / divertissement volontaire : ${fmtDur(a.cat.pause + a.cat.loisir)}. Temps non identifié : ${fmtDur(a.cat.unk)}.`);
   for (const o of a.pauseOver)
     out.push(`Ta pause prévue était de ${fmtDur(o.planned)}. Elle a duré ${fmtDur(o.actual - o.planned)} de plus.`);
   return out;

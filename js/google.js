@@ -89,47 +89,91 @@ export class GoogleCalendarProvider extends CalendarProvider {
   async getMirrorEvents(fromMs, toMs) {
     if (!this.calId) return [];
     try {
-      return (await this.listEvents(this.calId, fromMs, toMs)).map(e => ({ id: e.id, title: e.summary || '', start: Date.parse(e.start.dateTime), end: Date.parse(e.end.dateTime), colorId: e.colorId ?? null }));
+      return (await this.listEvents(this.calId, fromMs, toMs)).map(e => ({ id: e.id, title: e.summary || '', start: Date.parse(e.start.dateTime), end: Date.parse(e.end.dateTime), colorId: e.colorId ?? null, mt: e.extendedProperties?.private?.mt || '' }));
     } catch (e) { if (e.status === 404 || e.status === 410) return []; throw e; }
   }
 
-  /** Retourne l'id du calendrier "Mon temps" (le crée s'il n'existe pas). */
+  /** Tous les calendriers « Mon temps » de ce compte (il peut y en avoir plusieurs si l'app a été utilisée sur plusieurs appareils). */
+  async findCalendars() {
+    const list = await api('/users/me/calendarList?minAccessRole=owner');
+    return (list.items || []).filter(c => c.summary === CAL_NAME).map(c => c.id);
+  }
+
+  /** Retourne l'id du calendrier « Mon temps » : réutilise celui qui existe déjà (même créé depuis un autre appareil), sinon le crée. */
   async ensureCalendar() {
     if (this.calId) {
       try { await api(`/calendars/${encodeURIComponent(this.calId)}`); return this.calId; }
       catch (e) { if (e.status !== 404 && e.status !== 410) throw e; }
     }
-    const c = await api('/calendars', { method: 'POST', body: JSON.stringify({ summary: CAL_NAME, description: 'Sessions de productivité planifiées par Mon temps', timeZone: tz() }) });
+    const found = await this.findCalendars();
+    if (found.length) { this.calId = found[0]; return this.calId; }
+    const c = await api('/calendars', { method: 'POST', body: JSON.stringify({ summary: CAL_NAME, description: 'Mon temps : ce que tu fais, jour par jour', timeZone: tz() }) });
     this.calId = c.id;
     return c.id;
   }
 
   /**
-   * Synchronise des plages d'un jour (sessions prévues, temps perdu) : crée / met à jour / supprime.
-   * @param key jour 'YYYY-MM-DD' ; @param items [{id,start,end,summary,colorId?}] ; @param map { idElément: idÉvénement } mémorisé par l'app
-   * @returns nouvelle map + compteurs
+   * Synchronise un jour avec le calendrier « Mon temps ». Chaque événement de l'app porte un repère interne (jour + élément),
+   * ce qui permet de retrouver l'existant depuis n'importe quel appareil : jamais de doublon, les changements de l'app
+   * mettent à jour l'événement, et ce qui n'existe plus dans l'app est supprimé.
+   * @param items [{id,start,end,summary,colorId?}] (minutes depuis minuit) ; @param map { idÉlément: idÉvénement } (mémoire locale)
+   * @param keep ids d'événements Google à ne jamais supprimer (activités venant de Google)
    */
-  async pushDay(key, items, map = {}) {
-    const cal = encodeURIComponent(await this.ensureCalendar()), s0 = dayStartMs(key);
-    const next = {}, n = { created: 0, updated: 0, deleted: 0 };
-    const body = b => JSON.stringify({
-      summary: b.summary,
-      ...(b.colorId ? { colorId: b.colorId } : {}),
-      start: { dateTime: new Date(s0 + b.start * 60000).toISOString(), timeZone: tz() },
-      end: { dateTime: new Date(s0 + b.end * 60000).toISOString(), timeZone: tz() },
+  async pushDay(key, items, map = {}, keep = []) {
+    const calId = await this.ensureCalendar(), cal = encodeURIComponent(calId), s0 = dayStartMs(key);
+    const n = { created: 0, updated: 0, deleted: 0 }, out = {}, keepSet = new Set(keep);
+    const mtOf = e => e.extendedProperties?.private?.mt || '';
+    const sig = (summary, a, b) => `${summary}|${a}|${b}`;
+    const ms = (it, f) => s0 + it[f] * 60000;
+    const body = (it, mt) => JSON.stringify({
+      summary: it.summary,
+      ...(it.colorId ? { colorId: it.colorId } : {}),
+      extendedProperties: { private: { mt } },
+      start: { dateTime: new Date(ms(it, 'start')).toISOString(), timeZone: tz() },
+      end: { dateTime: new Date(ms(it, 'end')).toISOString(), timeZone: tz() },
     });
-    for (const b of items) {
-      if (map[b.id]) {
-        try { await api(`/calendars/${cal}/events/${map[b.id]}`, { method: 'PUT', body: body(b) }); next[b.id] = map[b.id]; n.updated++; continue; }
-        catch (e) { if (e.status !== 404 && e.status !== 410) throw e; }
+    const del = async e => { try { await api(`/calendars/${cal}/events/${e.id}`, { method: 'DELETE' }); n.deleted++; } catch (err) { if (err.status !== 404 && err.status !== 410) throw err; } };
+
+    const want = new Map(items.map(it => [`${key}|${it.id}`, it]));
+    const bySig = new Map(items.map(it => [sig(it.summary, ms(it, 'start'), ms(it, 'end')), `${key}|${it.id}`]));
+    const groups = new Map();
+    for (const e of await this.listEvents(calId, s0, s0 + 86400000)) {
+      let mt = mtOf(e);
+      if (!mt) mt = bySig.get(sig(e.summary, Date.parse(e.start.dateTime), Date.parse(e.end.dateTime))) || '';   // ancien événement sans repère : on l'adopte
+      if (mt) { if (!groups.has(mt)) groups.set(mt, []); groups.get(mt).push(e); }
+    }
+    for (const [mt, it] of want) {
+      const list = groups.get(mt) || [];
+      if (!list.length) {
+        const ev = await api(`/calendars/${cal}/events`, { method: 'POST', body: body(it, mt) });
+        out[it.id] = ev.id; n.created++;
+        continue;
       }
-      const ev = await api(`/calendars/${cal}/events`, { method: 'POST', body: body(b) });
-      next[b.id] = ev.id; n.created++;
+      const [first, ...dups] = list;
+      const stale = first.summary !== it.summary || (first.colorId || '') !== (it.colorId || '') || mtOf(first) !== mt
+        || Date.parse(first.start.dateTime) !== ms(it, 'start') || Date.parse(first.end.dateTime) !== ms(it, 'end');
+      if (stale) { await api(`/calendars/${cal}/events/${first.id}`, { method: 'PUT', body: body(it, mt) }); n.updated++; }
+      out[it.id] = first.id;
+      for (const d of dups) await del(d);                  // doublons
     }
-    for (const [bid, eid] of Object.entries(map)) {
-      if (next[bid]) continue;
-      try { await api(`/calendars/${cal}/events/${eid}`, { method: 'DELETE' }); n.deleted++; } catch { /* déjà supprimé */ }
+    for (const [mt, list] of groups)                       // supprimé dans l'app = supprimé dans Google
+      if (!want.has(mt) && mt.startsWith(`${key}|`)) for (const e of list) if (!keepSet.has(e.id)) await del(e);
+    return { map: out, calId, ...n };
+  }
+
+  /** Nettoyage : garde un seul calendrier « Mon temps », supprime les autres et les événements en double. */
+  async cleanup(preferId = '') {
+    const cals = await this.findCalendars(), res = { calendars: 0, events: 0, calId: '' };
+    if (!cals.length) return res;
+    const keep = cals.includes(preferId) ? preferId : cals[0];
+    for (const id of cals) if (id !== keep) { await api(`/calendars/${encodeURIComponent(id)}`, { method: 'DELETE' }); res.calendars++; }
+    const now = Date.now(), seen = new Set();
+    for (const e of await this.listEvents(keep, now - 90 * 86400000, now + 30 * 86400000)) {
+      const k = `${e.summary}|${e.start.dateTime}|${e.end.dateTime}`;
+      if (seen.has(k)) { try { await api(`/calendars/${encodeURIComponent(keep)}/events/${e.id}`, { method: 'DELETE' }); res.events++; } catch { /* déjà supprimé */ } }
+      else seen.add(k);
     }
-    return { map: next, calId: this.calId, ...n };
+    this.calId = keep; res.calId = keep;
+    return res;
   }
 }

@@ -24,6 +24,10 @@ export function applyMirror(st, events, classify, { fromMs, toMs, uid }) {
   // événement Google → élément de l'app (pour les éléments déjà envoyés par l'app)
   const rev = {};
   for (const [dk, d] of Object.entries(st.days)) for (const [item, ev] of Object.entries(d.gcal || {})) rev[ev] = { dk, item };
+  for (const e of events) if (e.mt && e.mt.includes('|')) {        // repère inscrit dans l'événement : fonctionne depuis n'importe quel appareil
+    const p = e.mt.indexOf('|');
+    rev[e.id] = { dk: e.mt.slice(0, p), item: e.mt.slice(p + 1) };
+  }
 
   const locate = id => {
     for (const [dk, d] of Object.entries(st.days)) {
@@ -61,7 +65,7 @@ export function applyMirror(st, events, classify, { fromMs, toMs, uid }) {
       else { newEntry(e, k, `g:${e.id}`); stat.created++; }
       continue;
     }
-    const d = st.days[r.dk], item = r.item;
+    const d = st.days[r.dk] || ensure(r.dk), item = r.item;
     if (isLogItem(item)) {
       const loc = locate(item.replace(/^(log|imp):/, ''));
       if (loc && !same(loc.en, e, k)) { apply(loc.en, e, k); rehome(loc); stat.updated++; }
