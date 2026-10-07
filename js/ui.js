@@ -473,6 +473,7 @@ function modalStale() {
 function modalBlock(id) {
   const b = id ? get().days[ui.viewDay]?.plan.find(x => x.id === id) : null;
   openModal(b ? 'Modifier le bloc' : 'Nouvelle contrainte', `<form data-submit="block" data-id="${id || ''}">
+    ${b && IMPORTED.includes(b.source) ? '<p class="muted small">📅 Cet événement vient de Google Agenda. Ta modification est gardée dans l\'app (statistiques), mais <b>ne change pas l\'événement dans Google</b> : pour cela, change sa couleur dans Google, puis importe.</p>' : ''}
     <label>Titre<input type="text" name="title" value="${esc(b?.title)}" placeholder="Ex. Cours d'automatique" required></label>
     <div class="grid3"><label>De<input type="time" name="from" value="${toInput(b?.start ?? 9 * 60)}" required></label><label>À<input type="time" name="to" value="${toInput(b?.end ?? 10 * 60)}" required></label></div>
     ${catRadios(b ? subOf(b) : 'obl')}
@@ -481,7 +482,12 @@ function modalBlock(id) {
     if (end <= start) return alert('L\'heure de fin doit être après le début.');
     update(st => {
       const d = ensureDay(st, ui.viewDay);
-      if (f.id) { const x = d.plan.find(p => p.id === f.id); Object.assign(x, { title: f.title.trim(), start, end, ...splitCat(f.cat), sub: splitCat(f.cat).sub, fixed: true, source: IMPORTED.includes(x.source) ? x.source : 'user' }); }
+      if (f.id) {
+        const x = d.plan.find(p => p.id === f.id); Object.assign(x, { title: f.title.trim(), start, end, ...splitCat(f.cat), sub: splitCat(f.cat).sub, fixed: true, source: IMPORTED.includes(x.source) ? x.source : 'user' });
+        if (IMPORTED.includes(x.source)) {                                   // événement venu de Google : on retient ta correction pour les prochains imports
+          (st.settings.overrides ||= {})[x.id.replace(/:\d{4}-\d\d-\d\d$/, '')] = { cat: x.cat, ...(x.sub ? { sub: x.sub } : {}), title: x.title };
+        }
+      }
       else d.plan.push({ id: uid(), title: f.title.trim(), start, end, ...splitCat(f.cat), fixed: true, source: 'user' });
       d.plan.sort((p, q) => p.start - q.start);
     });
