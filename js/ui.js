@@ -165,7 +165,7 @@ function renderPlan() {
     }).join('') : '<p class="muted">Planning vide.</p>'}
     <div class="row"><button class="btn" data-act="block-add">＋ Contrainte</button>
     ${!past ? '<button class="btn primary" data-act="plan-gen">✨ Proposer un planning</button>' : ''}
-    ${s.gcalClientId && key <= dayKey() && (day.plan.some(b => b.cat === 'prod') || day.log.length || a.lostSegs.length) ? '<button class="btn" data-act="gcal-push">📅 Envoyer vers Google Agenda</button>' : ''}</div>
+    ${s.gcalClientId && key <= dayKey() && (day.plan.some(b => b.cat === 'prod' || b.dirty) || day.log.length || a.lostSegs.length) ? '<button class="btn" data-act="gcal-push">📅 Envoyer vers Google Agenda</button>' : ''}</div>
     <p class="muted small">Les contraintes (cours, rendez-vous, transport…) sont respectées. Rien n'est déplacé sans ton accord.</p></section>`;
   return html;
 }
@@ -289,6 +289,7 @@ function renderSettingsRaw() {
     <button class="btn" data-act="gcal-cleanup" ${s.gcalClientId ? '' : 'disabled'}>Nettoyer les doublons dans Google</button></div>
     <p class="muted small">Ce que tu as fait (études, travail, pauses…) est envoyé dans le calendrier « Mon temps », avec la couleur de sa catégorie. Tu peux y changer la <b>couleur</b> (= le type), l'<b>heure</b>, le <b>titre</b>, ou <b>supprimer</b> un événement, y compris ceux de hier. Puis clique sur « Importer maintenant » : l'app met à jour tes statistiques (30 derniers jours). Un trou noir recolorié devient une activité identifiée.</p>
     <label class="check"><input type="checkbox" data-setting="gcalAuto" ${s.gcalAuto ? 'checked' : ''}> Synchroniser automatiquement (à l'ouverture et toutes les 30 min)</label>
+    ${Object.keys(s.overrides || {}).length ? `<div class="row"><span class="muted small">${Object.keys(s.overrides).length} correction(s) locale(s) / événement(s) masqué(s)</span><button class="btn small" data-act="overrides-reset">↩ Tout rétablir</button></div>` : ''}
     ${s.gcalSync ? `<p class="muted small">Dernière synchro Google : ${new Date(s.gcalSync).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · ${esc(s.gcalMsg)}</p>` : ''}
     <p class="muted small">Sans identifiant, tu peux importer un fichier .ics :</p>
     <label class="btn file">Importer un .ics<input type="file" accept=".ics,text/calendar" data-file="ics" hidden></label></section>
@@ -398,12 +399,20 @@ function modalEntryEdit(id) {
   const cats = e.cat === 'unk' ? [...PICKABLE] : PICKABLE;
   openModal('Modifier', `<form data-submit="entry-edit" data-id="${id}">
     <label>Nom<input type="text" name="title" value="${esc(e.title)}"></label>
+    <div class="grid3"><label>De<input type="time" name="from" value="${toInput(minuteOf(e.start, ui.viewDay))}" required></label><label>À<input type="time" name="to" value="${toInput(minuteOf(e.end, ui.viewDay))}" required></label></div>
     <p class="muted small">Type :</p>${catRadios(e.cat === 'unk' ? '' : subOf(e), cats)}
+    ${e.id.startsWith('g:') ? '<p class="muted small">📅 Créée dans Google Agenda : au prochain <b>Envoyer</b>, elle y sera mise à jour.</p>' : ''}
     <div class="row"><button class="btn primary">Enregistrer</button><button type="button" class="btn danger" data-act="entry-del" data-id="${id}">Supprimer</button></div></form>`, f => {
     if (!f.cat) return alert('Choisis un type.');
+    const a = fromInput(f.from), z = fromInput(f.to);
+    if (z <= a) return alert('L\'heure de fin doit être après le début.');
     update(st => {
       const x = (st.days[ui.viewDay]?.log || []).find(y => y.id === id);
       if (!x) return;
+      const s0 = dayStartMs(ui.viewDay);
+      x.start = s0 + a * 60000; x.end = s0 + z * 60000;
+      x.editedAt = Date.now();
+      if (x.id.startsWith('g:')) x.dirty = true;                       // activité venue de Google : à renvoyer
       const sp = splitCat(f.cat);
       x.cat = sp.cat; if (sp.sub) x.sub = sp.sub; else delete x.sub;
       x.title = f.title.trim() || CATS[sp.sub || sp.cat].label; delete x.dontKnow;
@@ -477,7 +486,7 @@ function modalBlock(id) {
     <label>Titre<input type="text" name="title" value="${esc(b?.title)}" placeholder="Ex. Cours d'automatique" required></label>
     <div class="grid3"><label>De<input type="time" name="from" value="${toInput(b?.start ?? 9 * 60)}" required></label><label>À<input type="time" name="to" value="${toInput(b?.end ?? 10 * 60)}" required></label></div>
     ${catRadios(b ? subOf(b) : 'obl')}
-    <div class="row"><button class="btn primary">Enregistrer</button>${b ? '<button type="button" class="btn danger" data-act="block-del">Supprimer</button>' : ''}</div></form>`, f => {
+    <div class="row"><button class="btn primary">Enregistrer</button>${b ? '<button type="button" class="btn danger" data-act="block-del">' + (b && IMPORTED.includes(b.source) ? 'Masquer' : 'Supprimer') + '</button>' : ''}${b && IMPORTED.includes(b.source) && (get().settings.overrides || {})[b.id.replace(/:\d{4}-\d\d-\d\d$/, '')] ? '<button type="button" class="btn" data-act="block-reset">↩ Rétablir la version Google</button>' : ''}</div></form>`, f => {
     const start = fromInput(f.from), end = fromInput(f.to);
     if (end <= start) return alert('L\'heure de fin doit être après le début.');
     update(st => {
@@ -485,6 +494,7 @@ function modalBlock(id) {
       if (f.id) {
         const x = d.plan.find(p => p.id === f.id), moved = x.start !== start || x.end !== end;
         Object.assign(x, { title: f.title.trim(), start, end, ...splitCat(f.cat), sub: splitCat(f.cat).sub, fixed: true, source: IMPORTED.includes(x.source) ? x.source : 'user' });
+        x.editedAt = Date.now();
         if (IMPORTED.includes(x.source)) {                                   // événement venu de Google : correction retenue ; renvoyée à Google au prochain envoi si le calendrier le permet
           const toGoogle = !x.ro;                                              // sans lien d'origine : l'app se reliera à Google au prochain envoi
           (st.settings.overrides ||= {})[x.id.replace(/:\d{4}-\d\d-\d\d$/, '')] = { cat: x.cat, ...(x.sub ? { sub: x.sub } : {}), title: x.title, ...(moved ? { start, end } : {}), ...(toGoogle ? { dirty: true } : {}) };
@@ -598,22 +608,42 @@ async function gcalPushDay(k, prov) {
   const keep = day.log.filter(e => e.id.startsWith('g:')).map(e => e.id.slice(2));
   const r = await prov.pushDay(k, items, day.gcal || {}, keep);
   update(s => { ensureDay(s, k).gcal = r.map; s.settings.gcalId = r.calId; });
-  // événements venus d'autres calendriers que tu as corrigés dans l'app : on les modifie à la source
-  r.written = 0; r.readOnly = 0;
-  for (const b of day.plan.filter(x => x.dirty && x.gref && !x.ro)) {
-    const okey = b.id.replace(/:\d{4}-\d\d-\d\d$/, '');
-    try {
-      await prov.patchEvent(b.gref.c, b.gref.e, { summary: b.title, colorId: col[b.unplanned ? 'imp' : subOf(b)], start: b.start, end: b.end }, s0);
-      r.written++;
-      update(s => { const bb = s.days[k]?.plan.find(y => y.id === b.id); if (bb) delete bb.dirty; if (s.settings.overrides) delete s.settings.overrides[okey]; });   // Google est à jour : plus besoin de la correction locale
-    } catch (e) {
-      if (/insufficient|scope/i.test(e.message)) throw new Error('Permission manquante : clique sur « Se connecter à Google » et accepte la nouvelle autorisation (modifier tes événements).');
-      if (e.status !== 403 && e.status !== 404) throw e;
-      r.readOnly++;                                                      // calendrier en lecture seule (ex. abonnement de l'université)
-      update(s => { const bb = s.days[k]?.plan.find(y => y.id === b.id); if (bb) { delete bb.dirty; bb.ro = true; } const o = s.settings.overrides?.[okey]; if (o) delete o.dirty; });
+  return r;
+}
+
+/** Écrit à la source (leur calendrier d'origine) les événements venus de Google que tu as corrigés dans l'app, tous jours confondus. */
+async function gcalWriteBack(prov) {
+  const col = get().settings.colors, out = { written: 0, readOnly: 0 };
+  for (const [k, day] of Object.entries(get().days)) {
+    for (const b of day.plan.filter(x => x.dirty && x.gref && !x.ro)) {
+      const okey = b.id.replace(/:\d{4}-\d\d-\d\d$/, '');
+      try {
+        await prov.patchEvent(b.gref.c, b.gref.e, { summary: b.title, colorId: col[b.unplanned ? 'imp' : subOf(b)], start: b.start, end: b.end }, dayStartMs(k));
+        out.written++;
+        update(s => { const bb = s.days[k]?.plan.find(y => y.id === b.id); if (bb) delete bb.dirty; if (s.settings.overrides) delete s.settings.overrides[okey]; });   // Google est à jour : plus besoin de la correction locale
+      } catch (e) {
+        if (/insufficient|scope/i.test(e.message)) throw new Error('Permission manquante : clique sur « Se connecter à Google » et accepte la nouvelle autorisation (modifier tes événements).');
+        if (e.status !== 403 && e.status !== 404) throw e;
+        out.readOnly++;                                                  // calendrier en lecture seule (ex. abonnement de l'université)
+        update(s => { const bb = s.days[k]?.plan.find(y => y.id === b.id); if (bb) { delete bb.dirty; bb.ro = true; } const o = s.settings.overrides?.[okey]; if (o) delete o.dirty; });
+      }
     }
   }
-  return r;
+  for (const [k, day] of Object.entries(get().days)) {           // activités créées dans Google (calendrier « Mon temps ») puis corrigées dans l'app
+    for (const e of day.log.filter(x => x.dirty && x.id.startsWith('g:'))) {
+      try {
+        const calId = get().settings.gcalId || await prov.ensureCalendar(), s0 = dayStartMs(k);
+        await prov.patchEvent(calId, e.id.slice(2), { summary: `${e.unplanned ? '⚡' : emojiOf(e)} ${e.title}`, colorId: col[e.unplanned ? 'imp' : subOf(e)], start: Math.round((e.start - s0) / 60000), end: Math.round((e.end - s0) / 60000) }, s0);
+        out.written++;
+        update(s => { const x = s.days[k]?.log.find(y => y.id === e.id); if (x) delete x.dirty; });
+      } catch (err) {
+        if (/insufficient|scope/i.test(err.message)) throw new Error('Permission manquante : clique sur « Se connecter à Google » et accepte la nouvelle autorisation (modifier tes événements).');
+        if (err.status !== 404 && err.status !== 410) throw err;
+        update(s => { const x = s.days[k]?.log.find(y => y.id === e.id); if (x) delete x.dirty; });   // l'événement n'existe plus dans Google
+      }
+    }
+  }
+  return out;
 }
 
 async function gcalRun(fn) {
@@ -710,7 +740,23 @@ document.addEventListener('click', e => {
     case 'goal-abandon': update(s => { s.days[ui.viewDay].goals.find(x => x.id === id).settled = 'abandoned'; }); break;
     case 'block-add': modalBlock(); break;
     case 'block-edit': modalBlock(id); break;
-    case 'block-del': { const bid = t.closest('form').dataset.id; update(s => { const d = s.days[ui.viewDay]; d.plan = d.plan.filter(b => b.id !== bid); }); closeModal(); break; }
+    case 'block-del': {
+      const bid = t.closest('form').dataset.id;
+      update(s => {
+        const d = s.days[ui.viewDay], b0 = d.plan.find(b => b.id === bid);
+        if (b0 && IMPORTED.includes(b0.source)) (s.settings.overrides ||= {})[bid.replace(/:\d{4}-\d\d-\d\d$/, '')] = { hidden: true };   // masqué dans l'app (pas supprimé dans Google)
+        d.plan = d.plan.filter(b => b.id !== bid);
+      });
+      closeModal(); break;
+    }
+    case 'block-reset': {
+      const bid = t.closest('form').dataset.id;
+      update(s => { if (s.settings.overrides) delete s.settings.overrides[bid.replace(/:\d{4}-\d\d-\d\d$/, '')]; const d = s.days[ui.viewDay]; d.plan = d.plan.filter(b => b.id !== bid); });
+      closeModal(); gcalImport({ interactive: true }); break;     // relit Google : la version de Google revient
+    }
+    case 'overrides-reset':
+      if (confirm('Annuler toutes tes corrections locales sur les événements venant de Google (et réafficher ceux que tu as masqués) ?')) { update(s => { s.settings.overrides = {}; }); gcalImport({ interactive: true, notify: true }); }
+      break;
     case 'plan-gen': modalPlanGen(); break;
     case 'reorg': modalReorg(); break;
     case 'apply-proposal': {
@@ -728,6 +774,7 @@ document.addEventListener('click', e => {
       if (needsRelink()) await gcalReadAll();                        // relie d'abord tes événements corrigés à leur calendrier d'origine
       const prov = new gg.GoogleCalendarProvider(get().settings.gcalId);
       const r = await gcalPushDay(ui.viewDay, prov);
+      Object.assign(r, await gcalWriteBack(prov));
       alert(`Google Agenda — « Mon temps » : ${r.created} créé(s), ${r.updated} mis à jour, ${r.deleted} supprimé(s).${r.written ? `\nÉvénements d'origine modifiés dans Google : ${r.written}.` : ''}${r.readOnly ? `\n${r.readOnly} événement(s) dans un calendrier en lecture seule : non modifié(s) dans Google.` : ''}`);
     }); break;
     case 'gcal-cleanup': gcalRun(async () => {
@@ -743,6 +790,7 @@ document.addEventListener('click', e => {
       const prov = new gg.GoogleCalendarProvider(get().settings.gcalId);
       let tot = { created: 0, updated: 0, deleted: 0, written: 0, readOnly: 0 };
       for (let i = 6; i >= 0; i--) { const dk = addDays(key, -i); if (!userDay(get().days[dk])) continue; const r = await gcalPushDay(dk, prov); for (const q in tot) tot[q] += r[q]; }
+      Object.assign(tot, await gcalWriteBack(prov));
       alert(`7 derniers jours envoyés : ${tot.created} créé(s), ${tot.updated} mis à jour, ${tot.deleted} supprimé(s)${tot.written ? `, ${tot.written} événement(s) d'origine modifié(s)` : ''}${tot.readOnly ? `, ${tot.readOnly} en lecture seule` : ''}.`);
     }); break;
     case 'notif-perm': notify.askPermission().then(render); break;

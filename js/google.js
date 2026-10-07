@@ -90,7 +90,7 @@ export class GoogleCalendarProvider extends CalendarProvider {
   async getMirrorEvents(fromMs, toMs) {
     if (!this.calId) return [];
     try {
-      return (await this.listEvents(this.calId, fromMs, toMs)).map(e => ({ id: e.id, title: e.summary || '', start: Date.parse(e.start.dateTime), end: Date.parse(e.end.dateTime), colorId: e.colorId ?? null, mt: e.extendedProperties?.private?.mt || '' }));
+      return (await this.listEvents(this.calId, fromMs, toMs)).map(e => ({ id: e.id, title: e.summary || '', start: Date.parse(e.start.dateTime), end: Date.parse(e.end.dateTime), colorId: e.colorId ?? null, mt: e.extendedProperties?.private?.mt || '', updated: Date.parse(e.updated) || 0 }));
     } catch (e) { if (e.status === 404 || e.status === 410) return []; throw e; }
   }
 

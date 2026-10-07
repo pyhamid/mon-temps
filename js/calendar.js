@@ -55,6 +55,7 @@ export function importEvents(events, ensureDay, st, source = 'ics') {
       const start = Math.max(0, Math.round((e.start - s0) / 60000)), end = Math.min(1440, Math.round((e.end - s0) / 60000));
       if (end <= start) continue;
       const day = ensureDay(st, key), id = `${source}:${e.uid}:${key}`, ov = (st.settings.overrides || {})[`${source}:${e.uid}`];
+      if (ov && ov.hidden) continue;                     // masqué par toi dans l'app
       const origin = e.calId ? { gref: { c: e.calId, e: e.uid }, ...(e.writable === false ? { ro: true } : {}) } : {};   // d'où vient l'événement (pour le modifier à la source)
       day.plan = day.plan.filter(b => b.id !== id);
       day.plan.push({ id, start, end, cat: e.cat || 'obl', ...(e.sub ? { sub: e.sub } : {}), title: e.title, fixed: true, source, ...origin, ...(e.unplanned ? { unplanned: true } : {}) });
