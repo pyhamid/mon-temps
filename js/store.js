@@ -1,6 +1,7 @@
 // État de l'application, persisté dans localStorage.
 // Pour passer plus tard à une base cloud : remplacer load()/save() uniquement.
 import { uid } from './time.js';
+import { DEFAULT_COLORS } from './colors.js';
 
 const KEY = 'temps-v1';
 
@@ -17,7 +18,12 @@ export const DEFAULT_SETTINGS = {
   icsUrl: '',              // lien d'abonnement .ics (calendrier de l'université)
   icsSync: 0,              // dernière synchronisation (ms)
   icsMsg: '',              // résultat de la dernière synchronisation
-  gcalId: '',              // id du calendrier "Mon temps" créé par l'app
+  gcalId: '',
+  gcalAuto: true,          // synchroniser Google automatiquement
+  gcalLinked: false,       // le compte a déjà été autorisé sur cet appareil
+  gcalSync: 0,
+  gcalMsg: '',              // id du calendrier "Mon temps" créé par l'app
+  colors: { ...DEFAULT_COLORS },   // code couleur (colorId Google par catégorie)
   notif: { reminder: true, late: true, unknown: true, end: true, reorg: true, pause: true },
 };
 
@@ -29,7 +35,7 @@ function load() {
   try {
     const s = JSON.parse(localStorage.getItem(KEY));
     if (s && s.v === 1) {
-      s.settings = { ...DEFAULT_SETTINGS, ...s.settings, notif: { ...DEFAULT_SETTINGS.notif, ...(s.settings || {}).notif } };
+      s.settings = { ...DEFAULT_SETTINGS, ...s.settings, notif: { ...DEFAULT_SETTINGS.notif, ...(s.settings || {}).notif }, colors: { ...DEFAULT_COLORS, ...(s.settings || {}).colors } };
       s.days ||= {}; s.notified ||= {};
       return s;
     }
@@ -67,7 +73,7 @@ export function importJSON(text) {
   const s = JSON.parse(text);
   if (!s || s.v !== 1 || typeof s.days !== 'object') throw new Error('Fichier de sauvegarde invalide');
   state = s;
-  state.settings = { ...DEFAULT_SETTINGS, ...s.settings, notif: { ...DEFAULT_SETTINGS.notif, ...(s.settings || {}).notif } };
+  state.settings = { ...DEFAULT_SETTINGS, ...s.settings, notif: { ...DEFAULT_SETTINGS.notif, ...(s.settings || {}).notif }, colors: { ...DEFAULT_COLORS, ...(s.settings || {}).colors } };
   save();
   listeners.forEach(f => f());
 }

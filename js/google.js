@@ -22,7 +22,7 @@ export function preload() {
 }
 
 /** À appeler directement depuis un clic (la fenêtre Google ne doit pas être bloquée). */
-export function connect(clientId) {
+export function connect(clientId, { silent = false } = {}) {
   return new Promise((resolve, reject) => {
     if (!clientId) return reject(new Error('Renseigne d\'abord l\'identifiant client Google.'));
     if (!window.google?.accounts?.oauth2) { preload(); return reject(new Error('Service Google pas encore chargé (connexion ?). Réessaie dans un instant.')); }
@@ -34,7 +34,8 @@ export function connect(clientId) {
       },
       error_callback: e => reject(new Error(e.type === 'popup_closed' ? 'Connexion annulée.' : (e.message || e.type))),
     });
-    client.requestAccessToken({ prompt: token ? '' : 'consent' });
+    // '' : Google ne redemande l'accord qu'à la toute première connexion ; 'none' : jamais de fenêtre
+    client.requestAccessToken({ prompt: silent ? 'none' : '' });
   });
 }
 
@@ -53,7 +54,7 @@ export class GoogleCalendarProvider extends CalendarProvider {
   constructor(calId) { super(); this.calId = calId; }
 
   /** Événements de tous tes calendriers (sauf "Mon temps") entre deux dates (ms). */
-  async getEvents(fromMs, toMs) {
+  async getEvents(fromMs, toMs, classify = () => ({})) {
     const list = await api('/users/me/calendarList?minAccessRole=reader');
     const out = [];
     for (const cal of list.items) {
@@ -66,7 +67,7 @@ export class GoogleCalendarProvider extends CalendarProvider {
         for (const e of res.items || []) {
           if (e.status === 'cancelled' || !e.start?.dateTime || e.transparency === 'transparent') continue;
           if ((e.attendees || []).some(a => a.self && a.responseStatus === 'declined')) continue;
-          out.push({ uid: e.id, title: e.summary || 'Événement', start: Date.parse(e.start.dateTime), end: Date.parse(e.end.dateTime) });
+          out.push({ uid: e.id, title: e.summary || 'Événement', start: Date.parse(e.start.dateTime), end: Date.parse(e.end.dateTime), ...classify(e.colorId) });
         }
         if (!(pageToken = res.nextPageToken)) break;
       }

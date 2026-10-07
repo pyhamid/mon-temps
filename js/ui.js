@@ -13,6 +13,7 @@ import { parseICS, importEvents, clearImported, fetchICS } from './calendar.js';
 import * as gg from './google.js';
 import * as notify from './notify.js';
 import * as lock from './lock.js';
+import { COLOR_KEYS, COLOR_META, GOOGLE_COLORS, hexOf, nameOf, duplicates, classifier } from './colors.js';
 
 const app = document.getElementById('app'), modalEl = document.getElementById('modal'), tabsEl = document.getElementById('tabs');
 const ui = { tab: 'home', viewDay: dayKey(), modal: null };
@@ -72,6 +73,7 @@ function renderHome() {
   const sigs = signals(st, now);
   if (!day.goals.length && !day.plan.length && nm < a.bed)
     sigs.push({ icon: '🗒️', text: 'Aucun objectif pour aujourd\'hui. Définis-les dans l\'onglet Planning pour obtenir un planning proposé.', action: 'tab-plan' });
+  if (ui.gcalTap) sigs.unshift({ icon: '📅', text: 'Google Agenda n\'est pas à jour. Un appui pour synchroniser.', action: 'gcal-sync' });
   html += `<section class="card"><h2>Alertes</h2>${sigs.length ? sigs.map(alertRow).join('') : '<p class="muted">Rien à signaler 👍</p>'}</section>`;
 
   html += `<div class="row"><button class="btn" data-act="unplanned">⚡ Imprévu</button><button class="btn" data-act="entry-open">＋ Activité passée</button></div>`;
@@ -81,7 +83,7 @@ function renderHome() {
 function alertRow(s) {
   const btn = {
     gap: ['Identifier', 'gap'], reorg: ['Réorganiser', 'reorg'], 'start-block': ['Commencer', 'start-block'],
-    resume: ['Reprendre', 'resume'], stop: ['Terminer', 'stop'], 'tab-plan': ['Ouvrir', 'tab-plan'],
+    resume: ['Reprendre', 'resume'], stop: ['Terminer', 'stop'], 'tab-plan': ['Ouvrir', 'tab-plan'], 'gcal-sync': ['Synchroniser', 'gcal-sync'],
   }[s.action];
   return `<div class="alert"><span>${s.icon} ${esc(s.text)}</span>${btn
     ? `<button class="btn small" data-act="${btn[1]}" data-id="${esc(s.ref || '')}" data-ref="${esc(s.ref || '')}">${btn[0]}</button>` : ''}</div>`;
@@ -162,6 +164,7 @@ function renderBilan() {
     ${['prod', 'obl', 'vie', 'pause', 'loisir', 'unk'].map(c => `
       <div class="line c-${c}"><div class="lh"><span>${catChip(c)}</span><b>${fmtDur(a.cat[c])} — ${fmtPct(a.cat[c], a.awake)}</b></div>
       <div class="bar"><i style="width:${a.awake ? a.cat[c] / a.awake * 100 : 0}%"></i></div></div>`).join('')}
+    ${a.unplanned ? `<div class="line c-imp"><div class="lh"><span>⚡ dont imprévus</span><b>${fmtDur(a.unplanned)} — ${fmtPct(a.unplanned, a.awake)}</b></div><div class="bar"><i style="width:${a.awake ? a.unplanned / a.awake * 100 : 0}%"></i></div></div>` : ''}
     <p class="muted">Temps réellement disponible (éveillé − obligations − vie quotidienne) : <b>${fmtDur(a.availSoFar)}</b>.
     ${a.unkPending ? ` Dont ${fmtDur(a.unkPending)} à identifier.` : ''}${a.unkLost ? ` ${fmtDur(a.unkLost)} déclarés « je ne sais plus » (temps perdu estimé).` : ''}</p></section>`;
 
@@ -202,10 +205,10 @@ function renderWeek() {
     <b>${a ? fmtDur(a.cat.prod) : '—'}</b></div>`).join('')}
     <p class="muted small">Le trait vertical indique l'objectif du jour.</p></section>`;
 
-  html += `<section class="card"><h2>Détail</h2><div class="scroll"><table><thead><tr><th></th><th>Prod.</th><th>Obj.</th><th>Dispo</th><th>Non id.</th><th>Oblig.</th><th>Pause</th><th>Loisir</th></tr></thead><tbody>
+  html += `<section class="card"><h2>Détail</h2><div class="scroll"><table><thead><tr><th></th><th>Prod.</th><th>Obj.</th><th>Dispo</th><th>Non id.</th><th>Oblig.</th><th>Pause</th><th>Loisir</th><th>Imprév.</th></tr></thead><tbody>
     ${rows.map(({ k, a }) => a ? `<tr><td>${dayShort(k)}</td><td>${fmtDur(a.cat.prod)}</td><td>${a.target ? Math.round(a.cat.prod / a.target * 100) + ' %' : '—'}</td>
-      <td>${fmtDur(a.availSoFar)}</td><td>${fmtDur(a.cat.unk)}</td><td>${fmtDur(a.cat.obl)}</td><td>${fmtDur(a.cat.pause)}</td><td>${fmtDur(a.cat.loisir)}</td></tr>`
-      : `<tr class="muted"><td>${dayShort(k)}</td><td colspan="7">—</td></tr>`).join('')}</tbody></table></div></section>`;
+      <td>${fmtDur(a.availSoFar)}</td><td>${fmtDur(a.cat.unk)}</td><td>${fmtDur(a.cat.obl)}</td><td>${fmtDur(a.cat.pause)}</td><td>${fmtDur(a.cat.loisir)}</td><td>${fmtDur(a.unplanned)}</td></tr>`
+      : `<tr class="muted"><td>${dayShort(k)}</td><td colspan="8">—</td></tr>`).join('')}</tbody></table></div></section>`;
 
   // tendances
   const lines = [];
@@ -253,11 +256,19 @@ function renderSettings() {
     <label>Lien d'abonnement<input type="text" data-setting="icsUrl" value="${esc(s.icsUrl)}" placeholder="https://… ou webcal://…" autocomplete="off" spellcheck="false"></label>
     <div class="row"><button class="btn primary" data-act="ics-sync" ${s.icsUrl ? '' : 'disabled'}>Synchroniser maintenant</button></div>
     ${s.icsSync ? `<p class="muted small">Dernière synchronisation : ${new Date(s.icsSync).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · ${esc(s.icsMsg)}</p>` : ''}</section>
+    <section class="card"><h2>🎨 Code couleur</h2>
+    <p class="muted">Ces couleurs sont les mêmes dans l'app et dans Google Agenda. Envoyé vers Google, chaque élément prend la couleur de sa catégorie. À l'import, la couleur d'un événement Google (clic droit sur l'événement, puis une couleur) le classe dans la bonne catégorie pour tes statistiques. Sans couleur : cours / obligation.</p>
+    ${COLOR_KEYS.map(k => `<div class="cc"><div class="ccl">${COLOR_META[k].emoji} ${COLOR_META[k].label}${COLOR_META[k].hint ? `<small>${COLOR_META[k].hint}</small>` : ''}</div>
+      <div class="sw">${GOOGLE_COLORS.map(c => `<button type="button" class="swatch ${s.colors[k] === c.id ? 'on' : ''}" style="background:${c.hex}" data-act="color-set" data-key="${k}" data-id="${c.id}" aria-label="${c.name}" title="${c.name}"></button>`).join('')}</div>
+      <span class="muted small">${nameOf(s.colors[k])}</span></div>`).join('')}
+    ${duplicates(s.colors).length ? `<p class="warn">⚠️ ${duplicates(s.colors).map(([x, y]) => `${COLOR_META[x].label} et ${COLOR_META[y].label}`).join(' ; ')} ont la même couleur : Google ne pourra pas les distinguer.</p>` : ''}</section>
     <section class="card"><h2>Google Agenda</h2>
     <p class="muted">Lecture de tes événements (cours, rendez-vous…) comme contraintes ; envoi des sessions de productivité dans un calendrier séparé « Mon temps », seulement quand tu le demandes.</p>
     <label>Identifiant client Google <span class="small">(voir LISEZMOI)</span><input type="text" data-setting="gcalClientId" value="${esc(s.gcalClientId)}" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false"></label>
     <div class="row"><button class="btn primary" data-act="gcal-connect" ${s.gcalClientId ? '' : 'disabled'}>${gg.isConnected() ? 'Connecté ✓' : 'Se connecter à Google'}</button>
-    <button class="btn" data-act="gcal-import" ${s.gcalClientId ? '' : 'disabled'}>Importer les 7 prochains jours</button></div>
+    <button class="btn" data-act="gcal-import" ${s.gcalClientId ? '' : 'disabled'}>Importer maintenant</button></div>
+    <label class="check"><input type="checkbox" data-setting="gcalAuto" ${s.gcalAuto ? 'checked' : ''}> Synchroniser automatiquement (à l'ouverture et toutes les 30 min)</label>
+    ${s.gcalSync ? `<p class="muted small">Dernière synchro Google : ${new Date(s.gcalSync).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · ${esc(s.gcalMsg)}</p>` : ''}
     <p class="muted small">Sans identifiant, tu peux importer un fichier .ics :</p>
     <label class="btn file">Importer un .ics<input type="file" accept=".ics,text/calendar" data-file="ics" hidden></label></section>
     <section class="card"><h2>🔒 Sécurité</h2><p class="muted">Le code n'est demandé qu'une fois sur cet appareil si tu as coché « Rester connecté ». « Verrouiller maintenant » le redemandera.</p>
@@ -270,7 +281,12 @@ function renderSettings() {
 
 // ----------------------------------------------------------------- Rendu
 const views = { home: renderHome, plan: renderPlan, bilan: renderBilan, week: renderWeek, settings: renderSettings };
+function applyColors() {
+  const c = get().settings.colors, r = document.documentElement.style;
+  for (const k of COLOR_KEYS) r.setProperty(`--c-${k === 'lost' ? 'unk' : k}`, hexOf(c[k]));
+}
 function render() {
+  applyColors();
   app.innerHTML = views[ui.tab]();
   tabsEl.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.tab === ui.tab));
 }
@@ -317,7 +333,7 @@ function modalEntry({ unplanned = false, gap = null, cat = 'prod', title = '' } 
       <p class="muted small">L'imprévu est enregistré comme terminé à l'instant. Je te proposerai ensuite de réorganiser le reste de la journée — rien ne bouge sans ton accord.</p>
       <button class="btn primary big">Ajouter</button></form>`, f => {
       const end = Date.now(), start = end - f.min * 60000;
-      update(st => { ensureDay(st, dayKey(new Date(start))).log.push({ id: uid(), cat: f.cat, title: f.title.trim(), goalId: null, start, end }); });
+      update(st => { ensureDay(st, dayKey(new Date(start))).log.push({ id: uid(), cat: f.cat, title: f.title.trim(), goalId: null, start, end, unplanned: true }); });
       setTimeout(modalReorg, 0);
     });
     return;
@@ -416,6 +432,30 @@ async function syncSub(manual) {
     if (manual) alert(msg);
   } finally { syncing = false; }
 }
+
+/** Lit Google Agenda (8 jours) et remplace les blocs importés. interactive = fenêtre Google autorisée (après un clic). */
+let gcalBusy = false;
+async function gcalImport({ interactive = false, notify = false } = {}) {
+  const st = get(), clientId = st.settings.gcalClientId;
+  if (!clientId || gcalBusy) return;
+  gcalBusy = true;
+  try {
+    if (!gg.isConnected()) await gg.connect(clientId, { silent: !interactive });
+    const key = dayKey(), from = dayStartMs(key), prov = new gg.GoogleCalendarProvider(st.settings.gcalId);
+    const events = await prov.getEvents(from, from + 8 * 86400000, classifier(get().settings.colors));
+    update(s => {
+      clearImported(ensureDay, s, 'gcal', key, 8);
+      importEvents(events, ensureDay, s, 'gcal');
+      Object.assign(s.settings, { gcalLinked: true, gcalSync: Date.now(), gcalMsg: `${events.length} événement(s) lu(s)` });
+    });
+    ui.gcalTap = false;
+    if (notify) alert(`${events.length} événement(s) lu(s) dans Google Agenda.`);
+  } catch (e) {
+    if (interactive) alert(e.message);
+    else if (get().settings.gcalLinked) { ui.gcalTap = true; if (!ui.modal) render(); }   // il faudra un appui pour renouveler l'accès
+  } finally { gcalBusy = false; }
+}
+const gcalDue = () => { const st = get().settings; return st.gcalAuto && st.gcalLinked && st.gcalClientId && !ui.gcalTap && Date.now() - st.gcalSync > 30 * 60000; };
 
 async function gcalRun(fn) {
   try { await fn(); } catch (e) { alert(e.message); }
@@ -518,22 +558,20 @@ document.addEventListener('click', e => {
       closeModal(); break;
     }
     case 'ics-sync': syncSub(true); break;
-    case 'gcal-connect': gcalRun(async () => { await gg.connect(st.settings.gcalClientId); render(); }); break;
-    case 'gcal-import': gcalRun(async () => {
-      if (!gg.isConnected()) await gg.connect(st.settings.gcalClientId);
-      const from = dayStartMs(key), prov = new gg.GoogleCalendarProvider(st.settings.gcalId);
-      const events = await prov.getEvents(from, from + 8 * 86400000);
-      let n = 0;
-      update(s => { clearImported(ensureDay, s, 'gcal', key, 8); n = importEvents(events, ensureDay, s, 'gcal'); });
-      alert(`${events.length} événement(s) lu(s) dans Google Agenda (${n} bloc(s) ajouté(s) comme obligations).`);
-    }); break;
+    case 'gcal-connect': gcalRun(async () => { await gg.connect(st.settings.gcalClientId); update(s => { s.settings.gcalLinked = true; }); }); break;
+    case 'gcal-import': gcalImport({ interactive: true, notify: true }); break;
+    case 'gcal-sync': gcalImport({ interactive: true }); break;
+    case 'color-set': update(s => { s.settings.colors[t.dataset.key] = t.dataset.id; }); break;
     case 'gcal-push': gcalRun(async () => {
       if (!gg.isConnected()) await gg.connect(st.settings.gcalClientId);
       const k = ui.viewDay, a = analyse(st, k, Date.now());
+      const col = st.settings.colors, s0 = dayStartMs(k);
       const items = [
-        ...(st.days[k]?.plan || []).filter(b => b.cat === 'prod').map(b => ({ id: b.id, start: b.start, end: b.end, summary: `📚 ${b.title}` })),
-        // temps perdu / non identifié : en noir (Graphite, la couleur la plus sombre de Google Agenda)
-        ...a.lostSegs.map(g => ({ id: g.id, start: g.start, end: g.end, summary: `⬛ ${g.title}`, colorId: '8' })),
+        ...(st.days[k]?.plan || []).filter(b => b.cat === 'prod' && !IMPORTED.includes(b.source)).map(b => ({ id: b.id, start: b.start, end: b.end, summary: `📚 ${b.title}`, colorId: col.prod })),
+        // imprévus déclarés dans l'app
+        ...(st.days[k]?.log || []).filter(e => e.unplanned).map(e => ({ id: `imp:${e.id}`, start: Math.round((e.start - s0) / 60000), end: Math.round((e.end - s0) / 60000), summary: `⚡ ${e.title}`, colorId: col.imp })),
+        // temps perdu / non identifié
+        ...a.lostSegs.map(g => ({ id: g.id, start: g.start, end: g.end, summary: `⬛ ${g.title}`, colorId: col.lost })),
       ];
       const prov = new gg.GoogleCalendarProvider(st.settings.gcalId);
       const r = await prov.pushDay(k, items, st.days[k]?.gcal || {});
@@ -582,10 +620,11 @@ subscribe(() => { if (!ui.modal) render(); });
 const typing = () => /INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName || '');
 setInterval(tick, 1000);
 const subDue = () => { const st = get().settings; return st.icsUrl && Date.now() - st.icsSync > 30 * 60000; };
-setInterval(() => { if (subDue()) syncSub(false); notify.check(); if (!ui.modal && !typing() && !document.hidden) render(); }, 30000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { notify.check(); if (!ui.modal) render(); } });
+setInterval(() => { if (subDue()) syncSub(false); if (gcalDue()) gcalImport(); notify.check(); if (!ui.modal && !typing() && !document.hidden) render(); }, 30000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { if (gcalDue()) gcalImport(); notify.check(); if (!ui.modal) render(); } });
 if (get().settings.gcalClientId) gg.preload();
 if (subDue()) syncSub(false);
+if (gcalDue() || (get().settings.gcalAuto && get().settings.gcalLinked && !get().settings.gcalSync)) gcalImport();
 render();
 notify.check();
 
