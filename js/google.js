@@ -136,12 +136,14 @@ export class GoogleCalendarProvider extends CalendarProvider {
 
     const want = new Map(items.map(it => [`${key}|${it.id}`, it]));
     const bySig = new Map(items.map(it => [sig(it.summary, ms(it, 'start'), ms(it, 'end')), `${key}|${it.id}`]));
-    const groups = new Map();
+    const groups = new Map(), legacy = [];
     for (const e of await this.listEvents(calId, s0, s0 + 86400000)) {
       let mt = mtOf(e);
       if (!mt) mt = bySig.get(sig(e.summary, Date.parse(e.start.dateTime), Date.parse(e.end.dateTime))) || '';   // ancien événement sans repère : on l'adopte
       if (mt) { if (!groups.has(mt)) groups.set(mt, []); groups.get(mt).push(e); }
+      else if (/^\s*⬛/.test(e.summary || '')) legacy.push(e);                                                      // ancien « temps perdu » devenu inutile
     }
+    for (const e of legacy) await del(e);
     for (const [mt, it] of want) {
       const list = groups.get(mt) || [];
       if (!list.length) {
@@ -170,7 +172,8 @@ export class GoogleCalendarProvider extends CalendarProvider {
     const now = Date.now(), seen = new Set();
     for (const e of await this.listEvents(keep, now - 90 * 86400000, now + 30 * 86400000)) {
       const k = `${e.summary}|${e.start.dateTime}|${e.end.dateTime}`;
-      if (seen.has(k)) { try { await api(`/calendars/${encodeURIComponent(keep)}/events/${e.id}`, { method: 'DELETE' }); res.events++; } catch { /* déjà supprimé */ } }
+      const legacyBlack = !e.extendedProperties?.private?.mt && /^\s*⬛/.test(e.summary || '');   // anciens « temps perdu » sans repère
+      if (seen.has(k) || legacyBlack) { try { await api(`/calendars/${encodeURIComponent(keep)}/events/${e.id}`, { method: 'DELETE' }); res.events++; } catch { /* déjà supprimé */ } }
       else seen.add(k);
     }
     this.calId = keep; res.calId = keep;

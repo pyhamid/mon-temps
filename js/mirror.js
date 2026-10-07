@@ -19,11 +19,14 @@ export function applyMirror(st, events, classify, { fromMs, toMs, uid }) {
   const stat = { updated: 0, created: 0, removed: 0 };
   const kind = e => (e.colorId == null ? { cat: 'prod', sub: 'etu' } : classify(e.colorId));
   const ensure = k => (st.days[k] ||= { wakePlanned: null, wakeActual: null, sleepPlanned: null, goals: [], plan: [], log: [] });
-  const seen = new Set(events.map(e => e.id));
 
   // événement Google → élément de l'app (pour les éléments déjà envoyés par l'app)
   const rev = {};
   for (const [dk, d] of Object.entries(st.days)) for (const [item, ev] of Object.entries(d.gcal || {})) rev[ev] = { dk, item };
+  // Anciens événements « ⬛ Non identifié » créés par l'app avant les repères internes (et inconnus de l'app) : ce ne sont pas des activités.
+  // (s'il a été recolorié, c'est devenu une vraie activité : on le garde)
+  events = events.filter(e => e.mt || rev[e.id] || !/^\s*⬛/.test(e.title || '') || kind(e).cat !== 'unk');
+  const seen = new Set(events.map(e => e.id));
   for (const e of events) if (e.mt && e.mt.includes('|')) {        // repère inscrit dans l'événement : fonctionne depuis n'importe quel appareil
     const p = e.mt.indexOf('|');
     rev[e.id] = { dk: e.mt.slice(0, p), item: e.mt.slice(p + 1) };
