@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mon temps</title>
+<meta name="theme-color" content="#4f46e5">
+<meta name="robots" content="noindex, nofollow">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="locked">
+<header><h1>⏱️ Mon temps</h1></header>
+<main id="app"></main>
+<nav id="tabs">
+  <button data-tab="home"><span>🏠</span>Maintenant</button>
+  <button data-tab="plan"><span>🗓️</span>Planning</button>
+  <button data-tab="bilan"><span>📊</span>Bilan</button>
+  <button data-tab="week"><span>📈</span>Semaine</button>
+  <button data-tab="settings"><span>⚙️</span>Réglages</button>
+</nav>
+<div id="modal" hidden></div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
