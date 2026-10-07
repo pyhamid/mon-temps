@@ -79,7 +79,9 @@ export function sessionElapsed(state, nowMs) {
 export function analyse(state, key, nowMs = Date.now()) {
   const s0 = dayStartMs(key), day = state.days[key] || EMPTY;
   const { wake, bed } = dayWindow(state, key);
-  const upto = Math.max(wake, Math.min(minuteOf(nowMs, key), bed));
+  // Aujourd'hui, tant que le réveil n'est pas confirmé, on ne compte aucun temps inconnu.
+  const unconfirmed = state.days[key]?.wakeActual == null && key === dayKey(new Date(nowMs));
+  const upto = unconfirmed ? wake : Math.max(wake, Math.min(minuteOf(nowMs, key), bed));
   const fixed = new Array(1440).fill(null), arr = new Array(1440).fill(null), lost = new Array(1440).fill(false);
   const fixedLost = new Array(1440).fill(false), impArr = new Array(1440).fill(false);
 

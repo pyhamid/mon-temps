@@ -6,7 +6,14 @@ import { analyse, blockDone, entriesOf, sessionElapsed } from './analysis.js';
 export function signals(state, nowMs = Date.now()) {
   const key = dayKey(new Date(nowMs)), day = state.days[key] || { plan: [], goals: [], log: [] };
   const a = analyse(state, key, nowMs), nowM = minuteOf(nowMs, key), cur = state.current, out = [];
-  if (nowM < a.wake || nowM >= a.bed) return out;        // pas d'alerte pendant le sommeil
+  // Chrono oublié : tourne depuis très longtemps, ou pendant la nuit
+  if (cur && cur.cat !== 'pause') {
+    const el = (nowMs - cur.start) / 60000;
+    if (el >= 240 || (el >= 60 && (nowM < a.wake || nowM >= a.bed)))
+      out.push({ id: `stale:${cur.id}`, type: 'end', icon: '⏱️', notify: false, action: 'stale',
+        text: `Le chrono « ${cur.title} » tourne depuis ${fmtDur(el)}. Tu as oublié de l'arrêter ?` });
+  }
+  if (nowM < a.wake || nowM >= a.bed) return out;        // pas d'autre alerte pendant le sommeil
 
   // Pause plus longue que prévu
   if (cur?.cat === 'pause' && cur.plannedMin && nowMs >= cur.start + cur.plannedMin * 60000)

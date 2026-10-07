@@ -3,7 +3,8 @@
 import { dayKey, dayStartMs, minuteOf, ceil5, uid } from './time.js';
 import { dayWindow, goalProgress, blockDone } from './analysis.js';
 
-const MIN_PART = 25;          // plus petite session qu'on accepte de placer
+const MIN_PART = 25;          // plus petit créneau qu'on regarde
+const MIN_SPLIT = 40;         // on ne coupe une session que si le morceau placé dure au moins ça
 const PREF_START = { morning: 8 * 60, afternoon: 14 * 60, evening: 19 * 60 };
 
 function freeSlots(from, to, busy) {
@@ -69,7 +70,10 @@ export function propose(state, key, nowMs = Date.now()) {
       const gap = lastLen >= s.breakAfter ? s.breakLen : 0;
       const start = cur + gap, avail = z - start, c = queue[0];
       if (avail < MIN_PART) break;
-      const len = Math.floor(Math.min(c.min, avail) / 5) * 5;
+      // session entière si elle tient ; sinon on ne la coupe que si les deux morceaux restent utiles
+      const len = c.min <= avail ? Math.floor(c.min / 5) * 5
+        : (avail >= MIN_SPLIT && c.min - avail >= 20 ? Math.floor(avail / 5) * 5 : 0);
+      if (!len) break;
       if (gap) add.push({ id: uid(), start: cur, end: start, cat: 'pause', title: 'Pause', fixed: false, source: 'auto' });
       add.push({ id: uid(), start, end: start + len, cat: 'prod', title: c.goal.title, goalId: c.goal.id, fixed: false, source: 'auto' });
       c.min -= len;

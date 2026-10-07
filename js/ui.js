@@ -1,5 +1,5 @@
 import {
-  get, update, subscribe, ensureDay, newDay, startActivity, pauseSession, resumeSession, stopSession,
+  get, update, subscribe, ensureDay, newDay, startActivity, pauseSession, resumeSession, stopSession, stopSessionAt,
   exportJSON, importJSON, resetAll,
 } from './store.js';
 import {
@@ -16,8 +16,9 @@ import * as lock from './lock.js';
 import { COLOR_KEYS, COLOR_META, GOOGLE_COLORS, hexOf, nameOf, duplicates, classifier } from './colors.js';
 
 const app = document.getElementById('app'), modalEl = document.getElementById('modal'), tabsEl = document.getElementById('tabs');
-const ui = { tab: 'home', viewDay: dayKey(), modal: null };
+const ui = { tab: 'home', viewDay: dayKey(), modal: null, open: {} };
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const SHORT = { prod: 'Travail', obl: 'Obligation', vie: 'Quotidien', pause: 'Pause', loisir: 'Loisir' };
 const catChip = c => `${CATS[c].emoji} ${CATS[c].label}`;
 const IMPORTED = ['ics', 'gcal', 'sub'];
 const nowM = () => minuteOf(Date.now(), dayKey());
@@ -30,8 +31,11 @@ function renderHome() {
 
   if (day.wakeActual == null && nm >= a.wake && nm < a.bed)
     html += `<section class="card"><h2>☀️ Bonjour</h2><p>À quelle heure t'es-tu réveillé ? <span class="muted">(prévu ${fmtHM(a.wake)})</span></p>
-      <form class="row" data-submit="wake"><input type="time" name="t" value="${toInput(Math.max(a.wake, Math.min(nm, 1439)))}" required>
+      <form class="row" data-submit="wake"><input type="time" name="t" value="${toInput(a.wake)}" required>
       <button class="btn primary">Valider</button><button type="button" class="btn" data-act="wake-ontime">À l'heure prévue</button></form></section>`;
+
+  const empty = !Object.keys(st.days).some(k => hasData(st, k));
+  if (empty) html += `<section class="card"><h2>👋 Pour commencer</h2><ol class="steps"><li>Onglet <b>Planning</b> : ajoute tes objectifs du jour.</li><li>Appuie sur <b>✨ Proposer un planning</b>.</li><li>Reviens ici et lance le chrono : <b>▶ Commencer</b>.</li></ol><button class="btn primary" data-act="tab-plan">Ouvrir le Planning</button></section>`;
 
   // Maintenant
   if (cur && sess) {
@@ -71,10 +75,14 @@ function renderHome() {
 
   // Alertes
   const sigs = signals(st, now);
-  if (!day.goals.length && !day.plan.length && nm < a.bed)
+  if (!empty && !day.goals.length && !day.plan.length && nm < a.bed)
     sigs.push({ icon: '🗒️', text: 'Aucun objectif pour aujourd\'hui. Définis-les dans l\'onglet Planning pour obtenir un planning proposé.', action: 'tab-plan' });
   if (ui.gcalTap) sigs.unshift({ icon: '📅', text: 'Google Agenda n\'est pas à jour. Un appui pour synchroniser.', action: 'gcal-sync' });
-  html += `<section class="card"><h2>Alertes</h2>${sigs.length ? sigs.map(alertRow).join('') : '<p class="muted">Rien à signaler 👍</p>'}</section>`;
+  const used = Object.keys(st.days).filter(k => st.days[k].log.length).length;
+  if (used >= 3 && Date.now() - st.settings.lastBackup > 14 * 86400000)
+    sigs.push({ icon: '💾', text: 'Sauvegarde conseillée : tes données ne sont que sur cet appareil (Réglages, puis Exporter).', action: 'tab-settings' });
+  const shown = sigs.slice(0, 3), more = sigs.length - shown.length;
+  html += `<section class="card"><h2>Alertes</h2>${shown.length ? shown.map(alertRow).join('') + (more > 0 ? `<p class="muted small">+ ${more} autre(s) alerte(s) à traiter d'abord.</p>` : '') : '<p class="muted">Rien à signaler 👍</p>'}</section>`;
 
   html += `<div class="row"><button class="btn" data-act="unplanned">⚡ Imprévu</button><button class="btn" data-act="entry-open">＋ Activité passée</button></div>`;
   return html;
@@ -83,7 +91,7 @@ function renderHome() {
 function alertRow(s) {
   const btn = {
     gap: ['Identifier', 'gap'], reorg: ['Réorganiser', 'reorg'], 'start-block': ['Commencer', 'start-block'],
-    resume: ['Reprendre', 'resume'], stop: ['Terminer', 'stop'], 'tab-plan': ['Ouvrir', 'tab-plan'], 'gcal-sync': ['Synchroniser', 'gcal-sync'],
+    resume: ['Reprendre', 'resume'], stop: ['Terminer', 'stop'], 'tab-plan': ['Ouvrir', 'tab-plan'], 'gcal-sync': ['Synchroniser', 'gcal-sync'], stale: ['Corriger', 'stale'], 'tab-settings': ['Ouvrir', 'tab-settings'],
   }[s.action];
   return `<div class="alert"><span>${s.icon} ${esc(s.text)}</span>${btn
     ? `<button class="btn small" data-act="${btn[1]}" data-id="${esc(s.ref || '')}" data-ref="${esc(s.ref || '')}">${btn[0]}</button>` : ''}</div>`;
@@ -205,10 +213,10 @@ function renderWeek() {
     <b>${a ? fmtDur(a.cat.prod) : '—'}</b></div>`).join('')}
     <p class="muted small">Le trait vertical indique l'objectif du jour.</p></section>`;
 
-  html += `<section class="card"><h2>Détail</h2><div class="scroll"><table><thead><tr><th></th><th>Prod.</th><th>Obj.</th><th>Dispo</th><th>Non id.</th><th>Oblig.</th><th>Pause</th><th>Loisir</th><th>Imprév.</th></tr></thead><tbody>
-    ${rows.map(({ k, a }) => a ? `<tr><td>${dayShort(k)}</td><td>${fmtDur(a.cat.prod)}</td><td>${a.target ? Math.round(a.cat.prod / a.target * 100) + ' %' : '—'}</td>
-      <td>${fmtDur(a.availSoFar)}</td><td>${fmtDur(a.cat.unk)}</td><td>${fmtDur(a.cat.obl)}</td><td>${fmtDur(a.cat.pause)}</td><td>${fmtDur(a.cat.loisir)}</td><td>${fmtDur(a.unplanned)}</td></tr>`
-      : `<tr class="muted"><td>${dayShort(k)}</td><td colspan="8">—</td></tr>`).join('')}</tbody></table></div></section>`;
+  html += `<section class="card"><h2>Détail par jour</h2>${rows.map(({ k, a }) => a ? `<div class="wd"><div class="wdh"><b>${dayShort(k)}</b>
+      <span>📚 ${fmtDur(a.cat.prod)}${a.target ? ` <small>(${Math.round(a.cat.prod / a.target * 100)} %)</small>` : ''}</span></div>
+      <div class="wdc"><span>Dispo ${fmtDur(a.availSoFar)}</span><span>❓ ${fmtDur(a.cat.unk)}</span><span>🔴 ${fmtDur(a.cat.obl)}</span><span>🌿 ${fmtDur(a.cat.pause)}</span><span>🎮 ${fmtDur(a.cat.loisir)}</span>${a.unplanned ? `<span>⚡ ${fmtDur(a.unplanned)}</span>` : ''}</div></div>`
+      : `<div class="wd muted"><div class="wdh"><b>${dayShort(k)}</b><span>—</span></div></div>`).join('')}</section>`;
 
   // tendances
   const lines = [];
@@ -232,6 +240,9 @@ function renderWeek() {
 
 // --------------------------------------------------------------- Réglages
 function renderSettings() {
+  return get().settings && renderSettingsRaw().replace(/<section class="card"><h2>(.*?)<\/h2>/g, (m, t) => `<details class="card sec" data-sec="${t}" ${ui.open[t] ? 'open' : ''}><summary>${t}</summary>`).replace(/<\/section>/g, '</details>');
+}
+function renderSettingsRaw() {
   const s = get().settings, n = s.notif;
   const perm = notify.supported() ? Notification.permission : 'unsupported';
   const chk = (k, label) => `<label class="check"><input type="checkbox" data-setting="notif.${k}" ${n[k] ? 'checked' : ''}> ${label}</label>`;
@@ -300,7 +311,7 @@ function tick() {
 }
 
 // ---------------------------------------------------------------- Modales
-const catRadios = (sel, cats = PICKABLE) => `<div class="cats">${cats.map(c => `<label><input type="radio" name="cat" value="${c}" ${c === sel ? 'checked' : ''}><span>${catChip(c)}</span></label>`).join('')}</div>`;
+const catRadios = (sel, cats = PICKABLE) => `<div class="cats">${cats.map(c => `<label><input type="radio" name="cat" value="${c}" ${c === sel ? 'checked' : ''}><span>${CATS[c].emoji} ${SHORT[c] || CATS[c].label}</span></label>`).join('')}</div>`;
 function openModal(title, body, onSubmit) {
   ui.modal = { onSubmit };
   modalEl.innerHTML = `<div class="sheet"><div class="sh"><h2>${title}</h2><button class="btn small" data-act="modal-close" aria-label="Fermer">✕</button></div>${body}</div>`;
@@ -311,13 +322,22 @@ function closeModal() { ui.modal = null; modalEl.hidden = true; modalEl.innerHTM
 const gapParse = r => r.split('-').map(Number);
 
 function modalStart(pre = {}) {
-  const key = dayKey(), goals = (get().days[key]?.goals || []).filter(g => !g.settled);
-  openModal('Commencer une activité', `<form data-submit="start">
-    ${goals.length ? `<div class="chips">${goals.map(g => `<button type="button" class="chip" data-act="pick-goal" data-id="${g.id}" data-title="${esc(g.title)}">📚 ${esc(g.title)}</button>`).join('')}</div>` : ''}
-    <input type="hidden" name="goalId" value="${pre.goalId || ''}">
+  const st = get(), key = dayKey(), goals = (st.days[key]?.goals || []).filter(g => !g.settled);
+  const titles = new Set(goals.map(g => g.title)), seen = new Set(), recents = [];
+  for (let i = 0; i < 14 && recents.length < 5; i++)
+    for (const e of [...(st.days[addDays(key, -i)]?.log || [])].reverse()) {
+      const k = `${e.cat}|${e.title}`;
+      if (e.goalId || ['unk', 'pause'].includes(e.cat) || titles.has(e.title) || seen.has(k) || recents.length >= 5) continue;
+      seen.add(k); recents.push(e);
+    }
+  const chip = (c, t, g, emoji) => `<button type="button" class="chip" data-act="quick-start" data-cat="${c}" data-title="${esc(t)}" data-goal="${g || ''}">${emoji} ${esc(t)}</button>`;
+  openModal('Commencer', `<form data-submit="start">
+    ${goals.length ? `<p class="muted small">Un appui pour démarrer :</p><div class="chips">${goals.map(g => chip('prod', g.title, g.id, '📚')).join('')}</div>` : ''}
+    ${recents.length ? `<p class="muted small">Récents :</p><div class="chips">${recents.map(e => chip(e.cat, e.title, '', CATS[e.cat].emoji)).join('')}</div>` : ''}
+    <p class="muted small">${goals.length || recents.length ? 'Ou autre chose :' : 'Que commences-tu ?'}</p>
     ${catRadios(pre.cat || 'prod')}
-    <label>Titre<input type="text" name="title" value="${esc(pre.title || '')}" placeholder="Ex. Traitement du signal" required></label>
-    <label class="plen">Durée de pause prévue (min)<input type="number" name="plannedMin" value="${get().settings.breakLen}" min="1"></label>
+    <label>Nom<input type="text" name="title" value="${esc(pre.title || '')}" placeholder="Ex. Traitement du signal" required></label>
+    <label class="plen">Durée de pause prévue (min)<input type="number" name="plannedMin" value="${st.settings.breakLen}" min="1"></label>
     <button class="btn primary big">▶ Commencer</button></form>`, f => {
     startActivity({ cat: f.cat, title: f.title.trim(), goalId: f.goalId || null, plannedMin: +f.plannedMin || null });
   });
@@ -328,22 +348,33 @@ function modalEntry({ unplanned = false, gap = null, cat = 'prod', title = '' } 
   const nm = Math.min(nowM(), 1439);
   const [gs, ge] = gap ? gapParse(gap) : [Math.max(0, nm - 60), nm];
   if (unplanned) {
-    openModal('⚡ Imprévu', `<form data-submit="unplanned"><label>Que s'est-il passé ?<input type="text" name="title" placeholder="Ex. Appel, dépannage…" required></label>
-      <label>Durée (minutes)<input type="number" name="min" value="45" min="5" max="600" required></label>${catRadios('obl')}
-      <p class="muted small">L'imprévu est enregistré comme terminé à l'instant. Je te proposerai ensuite de réorganiser le reste de la journée — rien ne bouge sans ton accord.</p>
+    openModal('⚡ Imprévu', `<form data-submit="unplanned"><label>Que s'est-il passé ? <span class="muted">(facultatif)</span><input type="text" name="title" placeholder="Ex. Appel, dépannage…"></label>
+      <label>Combien de temps a-t-il duré ? (minutes)<input type="number" name="min" value="30" min="5" max="600" required></label>
+      <div class="chips">${[15, 30, 45, 60, 90].map(m => `<button type="button" class="chip" data-act="set-min" data-min="${m}">${m} min</button>`).join('')}</div>
+      <p class="muted small">Enregistré comme terminé à l'instant. Je te proposerai ensuite de réorganiser la suite de la journée : rien ne bouge sans ton accord.</p>
       <button class="btn primary big">Ajouter</button></form>`, f => {
       const end = Date.now(), start = end - f.min * 60000;
-      update(st => { ensureDay(st, dayKey(new Date(start))).log.push({ id: uid(), cat: f.cat, title: f.title.trim(), goalId: null, start, end, unplanned: true }); });
+      update(st => { ensureDay(st, dayKey(new Date(start))).log.push({ id: uid(), cat: 'obl', title: f.title.trim() || 'Imprévu', goalId: null, start, end, unplanned: true }); });
       setTimeout(modalReorg, 0);
     });
     return;
   }
-  openModal(gap ? '❓ Que faisais-tu ?' : 'Ajouter une activité', `<form data-submit="entry" data-day="${ik}">
-    ${gap ? '<label>Décris en quelques mots<input type="text" name="title" placeholder="Ex. je préparais à manger"></label>' : '<label>Titre<input type="text" name="title" required></label>'}
+  if (gap) {
+    openModal('❓ Que faisais-tu ?', `<form data-submit="entry" data-day="${ik}">
+      <p><b>${fmtHM(gs)}–${fmtHM(ge)}</b> <span class="muted">· ${fmtDur(ge - gs)}</span></p>
+      <label>En quelques mots <span class="muted">(facultatif)</span><input type="text" name="title" placeholder="Ex. je préparais à manger"></label>
+      <p class="muted small">Touche ce qui correspond :</p>
+      <div class="quick">${PICKABLE.map(c => `<button class="btn qbtn" name="cat" value="${c}">${CATS[c].emoji} ${SHORT[c]}</button>`).join('')}</div>
+      <button type="button" class="btn" data-act="gap-unknown" style="width:100%;margin-top:8px">❓ Je ne sais plus</button>
+      <details class="adj"><summary>Ajuster les heures</summary><div class="grid3"><label>De<input type="time" name="from" value="${toInput(gs)}" required></label><label>À<input type="time" name="to" value="${toInput(ge)}" required></label></div></details></form>`,
+      f => saveEntry(f, ik));
+    return;
+  }
+  openModal('Ajouter une activité', `<form data-submit="entry" data-day="${ik}">
+    <label>Nom<input type="text" name="title" required></label>
     <div class="grid3"><label>De<input type="time" name="from" value="${toInput(gs)}" required></label><label>À<input type="time" name="to" value="${toInput(ge)}" required></label></div>
     ${catRadios(cat)}
-    <div class="row">${gap ? '<button class="btn primary" data-act="gap-ok">Enregistrer</button><button type="button" class="btn" data-act="gap-unknown">Je ne sais plus</button>' : '<button class="btn primary">Ajouter</button>'}</div></form>`,
-    f => saveEntry(f, ik));
+    <button class="btn primary big">Ajouter</button></form>`, f => saveEntry(f, ik));
 }
 
 function saveEntry(f, key, extra = {}) {
@@ -362,13 +393,46 @@ function modalGoal(id) {
     <label>Matière / projet<input type="text" name="title" value="${esc(g?.title)}" placeholder="Ex. Traitement du signal" required></label>
     <label>Durée visée (heures)<input type="number" name="h" step="0.25" min="0.25" max="12" value="${g ? g.target / 60 : 1}" required></label>
     <label class="check"><input type="checkbox" name="hard" ${g?.hard ? 'checked' : ''}> Matière difficile (placée en premier)</label>
+    <label class="check"><input type="checkbox" name="rec" ${g?.recurId ? 'checked' : ''}> Répéter chaque jour de la semaine (lun–ven)</label>
     <div class="row"><button class="btn primary">Enregistrer</button>${g ? '<button type="button" class="btn danger" data-act="goal-del">Supprimer</button>' : ''}</div></form>`, f => {
     update(st => {
-      const d = ensureDay(st, ui.viewDay), target = Math.round(+f.h * 60);
-      if (f.id) Object.assign(d.goals.find(x => x.id === f.id), { title: f.title.trim(), target, hard: !!f.hard });
-      else d.goals.push({ id: uid(), title: f.title.trim(), target, hard: !!f.hard });
+      const d = ensureDay(st, ui.viewDay), target = Math.round(+f.h * 60), title = f.title.trim(), hard = !!f.hard, R = st.settings.recurring;
+      let g = f.id ? d.goals.find(x => x.id === f.id) : null;
+      if (g) Object.assign(g, { title, target, hard }); else { g = { id: uid(), title, target, hard }; d.goals.push(g); }
+      if (f.rec) {
+        let r = R.find(x => x.id === g.recurId);
+        if (!r) { r = { id: uid() }; R.push(r); g.recurId = r.id; }
+        Object.assign(r, { title, target, hard }); d.recurDone = true;
+      } else if (g.recurId) { st.settings.recurring = R.filter(x => x.id !== g.recurId); delete g.recurId; }
     });
   });
+}
+
+/** Ajoute les objectifs répétés (lun–ven) à un jour, une seule fois. */
+function ensureRecurring(key) {
+  const st = get(), wd = new Date(key.replace(/-/g, '/')).getDay();
+  if (wd === 0 || wd === 6 || key < dayKey() || !st.settings.recurring.length || st.days[key]?.recurDone) return;
+  update(s => {
+    const day = ensureDay(s, key);
+    for (const r of s.settings.recurring) if (!day.goals.some(g => g.recurId === r.id)) day.goals.push({ id: uid(), title: r.title, target: r.target, hard: r.hard, recurId: r.id });
+    day.recurDone = true;
+  });
+}
+
+const endFromTime = (startMs, hhmm) => {
+  const d = new Date(startMs), [h, m] = hhmm.split(':').map(Number);
+  d.setHours(h, m, 0, 0);
+  return d.getTime() <= startMs ? d.getTime() + 86400000 : d.getTime();
+};
+function modalStale() {
+  const c = get().current;
+  if (!c) return;
+  const def = new Date(Math.min(Date.now(), c.start + get().settings.session * 60000));
+  openModal('⏱️ Chrono oublié', `<form data-submit="stale"><p>« ${esc(c.title)} » a démarré à <b>${new Date(c.start).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</b>. À quelle heure as-tu arrêté ?</p>
+    <label>Heure d'arrêt<input type="time" name="t" value="${toInput(def.getHours() * 60 + def.getMinutes())}" required></label>
+    <button class="btn primary big">Terminer à cette heure</button>
+    <button type="button" class="btn" data-act="stop-now" style="width:100%;margin-top:8px">Il tournait vraiment : terminer maintenant</button></form>`,
+    f => { stopSessionAt(endFromTime(c.start, f.t)); });
 }
 
 function modalBlock(id) {
@@ -460,13 +524,13 @@ const gcalDue = () => { const st = get().settings; return st.gcalAuto && st.gcal
 async function gcalRun(fn) {
   try { await fn(); } catch (e) { alert(e.message); }
 }
-const formData = form => Object.fromEntries(new FormData(form).entries());
+const formData = (form, sub) => Object.fromEntries(new FormData(form, sub).entries());
 
 document.addEventListener('submit', e => {
   const form = e.target.closest('form[data-submit]');
   if (!form) return;
   e.preventDefault();
-  const f = formData(form);
+  const f = formData(form, e.submitter);
   if (form.dataset.id !== undefined) f.id = form.dataset.id;
   const name = form.dataset.submit;
   if (name === 'wake') { update(st => { ensureDay(st, dayKey()).wakeActual = fromInput(f.t); }); return; }
@@ -484,16 +548,17 @@ document.addEventListener('click', e => {
   const goalOf = gid => (st.days[ui.viewDay]?.goals || st.days[key]?.goals || []).find(g => g.id === gid);
   switch (act) {
     case 'tab': ui.tab = t.dataset.tab; render(); break;
-    case 'tab-plan': ui.tab = 'plan'; ui.viewDay = key; render(); break;
+    case 'tab-plan': ui.tab = 'plan'; ui.viewDay = key; ensureRecurring(key); render(); break;
     case 'day-prev': ui.viewDay = addDays(ui.viewDay, -1); render(); break;
-    case 'day-next': ui.viewDay = addDays(ui.viewDay, 1); render(); break;
+    case 'day-next': ui.viewDay = addDays(ui.viewDay, 1); ensureRecurring(ui.viewDay); render(); break;
     case 'day-today': ui.viewDay = key; render(); break;
     case 'modal-close': closeModal(); break;
     case 'start-open': modalStart(); break;
-    case 'pick-goal': {
-      const f = t.closest('form'); f.goalId.value = id; f.title.value = t.dataset.title;
-      f.querySelector('input[name=cat][value=prod]').checked = true; break;
-    }
+    case 'quick-start': startActivity({ cat: t.dataset.cat, title: t.dataset.title, goalId: t.dataset.goal || null }); closeModal(); break;
+    case 'set-min': t.closest('form').min.value = t.dataset.min; break;
+    case 'stale': modalStale(); break;
+    case 'stop-now': stopSession(); closeModal(); break;
+    case 'tab-settings': ui.tab = 'settings'; render(); break;
     case 'start-goal': { const g = goalOf(id); if (g) startActivity({ cat: 'prod', title: g.title, goalId: g.id }); break; }
     case 'start-block': {
       const b = (st.days[key]?.plan || []).find(x => x.id === id);
@@ -508,12 +573,12 @@ document.addEventListener('click', e => {
     case 'entry-open': modalEntry(); break;
     case 'entry-del': update(s => { const d = s.days[ui.viewDay]; if (d) d.log = d.log.filter(x => x.id !== id); }); break;
     case 'gap': {
-      const ref = t.dataset.ref || t.dataset.id;
-      modalEntry({ gap: ref, cat: '' });
+      modalEntry({ gap: t.dataset.ref || t.dataset.id });
       const form = modalEl.querySelector('form'), input = form.querySelector('input[name=title]');
-      input.addEventListener('input', () => { const c = classify(input.value); if (c) form.querySelector(`input[name=cat][value=${c}]`).checked = true; });
-      form.querySelectorAll('input[name=cat]').forEach(r => (r.checked = false));
-      form.addEventListener('submit', ev => { if (!form.querySelector('input[name=cat]:checked')) { ev.stopImmediatePropagation(); ev.preventDefault(); alert('Choisis une catégorie (ou « Je ne sais plus »).'); } }, true);
+      input.addEventListener('input', () => {
+        const c = classify(input.value);
+        form.querySelectorAll('.qbtn').forEach(b => b.classList.toggle('sugg', b.value === c));
+      });
       break;
     }
     case 'gap-unknown': {
@@ -525,7 +590,7 @@ document.addEventListener('click', e => {
     case 'goal-edit': modalGoal(id); break;
     case 'goal-del': {
       const gid = t.closest('form').dataset.id;
-      update(s => { const d = s.days[ui.viewDay]; d.goals = d.goals.filter(g => g.id !== gid); d.plan = d.plan.filter(b => b.goalId !== gid || b.fixed); });
+      update(s => { const d = s.days[ui.viewDay], g0 = d.goals.find(g => g.id === gid); if (g0?.recurId && confirm('Supprimer aussi ce modèle pour les jours suivants ?')) s.settings.recurring = s.settings.recurring.filter(r => r.id !== g0.recurId); d.goals = d.goals.filter(g => g.id !== gid); d.plan = d.plan.filter(b => b.goalId !== gid || b.fixed); });
       closeModal(); break;
     }
     case 'goals-copy': update(s => { const prev = s.days[addDays(ui.viewDay, -1)]; if (prev) ensureDay(s, ui.viewDay).goals.push(...prev.goals.filter(g => g.settled !== 'abandoned').map(g => ({ id: uid(), title: g.title, target: g.target, hard: g.hard }))); }); break;
@@ -582,7 +647,8 @@ document.addEventListener('click', e => {
     case 'export': {
       const a = document.createElement('a');
       a.href = URL.createObjectURL(new Blob([exportJSON()], { type: 'application/json' }));
-      a.download = `mon-temps-${key}.json`; a.click(); break;
+      a.download = `mon-temps-${key}.json`; a.click();
+      update(s => { s.settings.lastBackup = Date.now(); }); break;
     }
     case 'reset': if (confirm('Effacer toutes les données de cet appareil ? Cette action est irréversible.')) resetAll(); break;
   }
@@ -609,6 +675,8 @@ document.addEventListener('change', async e => {
   }
 });
 
+document.addEventListener('toggle', e => { const d = e.target; if (d.dataset && d.dataset.sec) ui.open[d.dataset.sec] = d.open; }, true);
+
 tabsEl.addEventListener('click', e => {
   const b = e.target.closest('button[data-tab]');
   if (b) { ui.tab = b.dataset.tab; if (ui.tab !== 'home') ui.viewDay = ui.viewDay || dayKey(); render(); window.scrollTo(0, 0); }
@@ -620,8 +688,9 @@ subscribe(() => { if (!ui.modal) render(); });
 const typing = () => /INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName || '');
 setInterval(tick, 1000);
 const subDue = () => { const st = get().settings; return st.icsUrl && Date.now() - st.icsSync > 30 * 60000; };
-setInterval(() => { if (subDue()) syncSub(false); if (gcalDue()) gcalImport(); notify.check(); if (!ui.modal && !typing() && !document.hidden) render(); }, 30000);
+setInterval(() => { ensureRecurring(dayKey()); if (subDue()) syncSub(false); if (gcalDue()) gcalImport(); notify.check(); if (!ui.modal && !typing() && !document.hidden) render(); }, 30000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { if (gcalDue()) gcalImport(); notify.check(); if (!ui.modal) render(); } });
+ensureRecurring(dayKey());
 if (get().settings.gcalClientId) gg.preload();
 if (subDue()) syncSub(false);
 if (gcalDue() || (get().settings.gcalAuto && get().settings.gcalLinked && !get().settings.gcalSync)) gcalImport();

@@ -19,6 +19,8 @@ export const DEFAULT_SETTINGS = {
   icsSync: 0,              // dernière synchronisation (ms)
   icsMsg: '',              // résultat de la dernière synchronisation
   gcalId: '',
+  recurring: [],           // objectifs répétés du lundi au vendredi : {id,title,target,hard}
+  lastBackup: 0,           // dernière sauvegarde exportée (ms)
   gcalAuto: true,          // synchroniser Google automatiquement
   gcalLinked: false,       // le compte a déjà été autorisé sur cet appareil
   gcalSync: 0,
@@ -102,6 +104,10 @@ function closeCurrent(st, now) {
 export function startActivity({ cat, title, goalId = null, plannedMin = null }) {
   update(st => {
     const now = Date.now();
+    // Si le réveil n'a pas été indiqué, le premier chrono fait foi (évite de compter la matinée comme « non identifiée »).
+    const d = new Date(now), key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const day = ensureDay(st, key), m = d.getHours() * 60 + d.getMinutes();
+    if (day.wakeActual == null && m >= (day.wakePlanned ?? st.settings.wake)) day.wakeActual = m;
     closeCurrent(st, now);
     const sid = uid();
     st.session = { id: sid, cat, title, goalId };
@@ -129,4 +135,20 @@ export function resumeSession() {
 
 export function stopSession() {
   update(st => { closeCurrent(st, Date.now()); st.session = null; });
+}
+
+/** Termine le chrono en cours à une heure donnée (chrono oublié). */
+export function stopSessionAt(endMs) {
+  update(st => {
+    const c = st.current;
+    if (c) {
+      const end = Math.max(c.start, Math.min(endMs, Date.now()));
+      if (end - c.start >= 30000) {
+        const d = new Date(c.start);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        ensureDay(st, key).log.push({ ...c, end });
+      }
+    }
+    st.current = null; st.session = null;
+  });
 }
