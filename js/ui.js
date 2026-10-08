@@ -207,9 +207,16 @@ function renderBilan() {
       <button class="btn small" data-act="gap" data-ref="${g.start}-${g.end}">Identifier</button></div>`).join('')}</section>`;
 
   const day = st.days[key], log = (day?.log || []).slice().sort((x, y) => x.start - y.start);
-  html += `<section class="card"><h2>Journal</h2>${log.length ? log.map(e => `<div class="alert"><span>${new Date(e.start).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}–${new Date(e.end).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+  // contraintes déjà passées : supposées faites, elles apparaissent dans le journal (✎ pour les corriger)
+  const t0 = dayStartMs(key), hm = m => fmtHM(m);
+  const assumed = (day?.plan || []).filter(b => b.fixed && b.cat !== 'unk' && b.start < a.upto && b.end > a.wake).map(b => ({ b, s: t0 + b.start * 60000 }));
+  const rows = [...log.map(e => ({ e, s: e.start })), ...assumed].sort((x, y) => x.s - y.s);
+  html += `<section class="card"><h2>Journal</h2>${rows.length ? rows.map(r => r.b ? `<div class="alert"><span>${hm(r.b.start)}–${hm(Math.min(r.b.end, a.upto))}
+    · ${emojiOf(r.b)} ${esc(r.b.title)} (${fmtDur(Math.min(r.b.end, a.upto) - r.b.start)}) <span class="tag">contrainte · supposée faite</span></span>
+    <span class="row tight"><button class="btn small" data-act="block-edit" data-id="${r.b.id}" aria-label="Modifier">✎</button></span></div>`
+    : (e => `<div class="alert"><span>${new Date(e.start).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}–${new Date(e.end).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
     · ${emojiOf(e)} ${esc(e.title)} (${fmtDur((e.end - e.start) / 60000)})</span>
-    <span class="row tight"><button class="btn small" data-act="entry-edit" data-id="${e.id}" aria-label="Modifier">✎</button><button class="btn small" data-act="entry-del" data-id="${e.id}" aria-label="Supprimer">✕</button></span></div>`).join('') : '<p class="muted">Aucune activité enregistrée.</p>'}
+    <span class="row tight"><button class="btn small" data-act="entry-edit" data-id="${e.id}" aria-label="Modifier">✎</button><button class="btn small" data-act="entry-del" data-id="${e.id}" aria-label="Supprimer">✕</button></span></div>`)(r.e)).join('') : '<p class="muted">Aucune activité enregistrée.</p>'}
     <div class="row"><button class="btn" data-act="entry-open">＋ Ajouter une activité</button></div></section>`;
   return html;
 }

@@ -89,9 +89,9 @@ export function analyse(state, key, nowMs = Date.now()) {
 
   // blocs fixes (cours, imprévus, temps perdu… venant du calendrier ou saisis à la main)
   for (const b of day.plan)
-    if (b.fixed && (['obl', 'vie', 'pause', 'loisir', 'unk'].includes(b.cat) || (b.cat === 'prod' && b.sub === 'trav')))
+    if (b.fixed && (['obl', 'vie', 'pause', 'loisir', 'unk', 'prod'].includes(b.cat)))
       for (let m = Math.max(0, b.start); m < Math.min(b.end, 1440); m++) {
-        fixed[m] = b.cat === 'prod' ? 'trav' : b.cat;
+        fixed[m] = b.cat === 'prod' ? (b.sub === 'trav' ? 'trav' : 'etuf') : b.cat;
         if (b.cat === 'unk') fixedLost[m] = true;
         if (b.unplanned) impArr[m] = true;
         if (b.sub) subArr[m] = b.sub;
@@ -99,8 +99,8 @@ export function analyse(state, key, nowMs = Date.now()) {
   // blocs fixes déjà passés : supposés réalisés (le journal les remplace si besoin)
   const fixedWork = new Array(1440).fill(false);       // cours / travail "supposés faits" (calendrier)
   for (let m = 0; m < upto; m++) {
-    arr[m] = fixed[m] === 'trav' ? 'prod' : fixed[m];
-    if (fixed[m] === 'trav') { fixedWork[m] = true; subArr[m] = 'trav'; }
+    arr[m] = fixed[m] === 'trav' || fixed[m] === 'etuf' ? 'prod' : fixed[m];
+    if (fixed[m] === 'trav' || fixed[m] === 'etuf') { fixedWork[m] = true; subArr[m] = fixed[m] === 'trav' ? 'trav' : 'etu'; }
     if (fixedLost[m]) lost[m] = true;
   }
   const futureFixed = fixed;
