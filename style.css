@@ -143,7 +143,7 @@ details.sec[open] > summary { margin-bottom: 8px; }
 .steps { margin: 6px 0 12px; padding-left: 20px; } .steps li { margin: 4px 0; }
 .quick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .quick .qbtn { padding: 14px 4px; flex-direction: column; font-size: .9rem; gap: 2px; }
-.qbtn.sugg { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
+.qbtn.sugg, [data-act=gap-unknown].sugg { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
 details.adj { margin-top: 10px; } details.adj > summary { color: var(--accent); cursor: pointer; font-size: .9rem; }
 
 /* Aucune page ne doit dépasser la largeur de l'écran (sinon le navigateur dézoome).
