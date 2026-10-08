@@ -209,10 +209,11 @@ function renderBilan() {
   const day = st.days[key], log = (day?.log || []).slice().sort((x, y) => x.start - y.start);
   // contraintes déjà passées : supposées faites, elles apparaissent dans le journal (✎ pour les corriger)
   const t0 = dayStartMs(key), hm = m => fmtHM(m);
-  const assumed = (day?.plan || []).filter(b => b.fixed && b.cat !== 'unk' && b.start < a.upto && b.end > a.wake).map(b => ({ b, s: t0 + b.start * 60000 }));
+  const cut = key === dayKey() ? Math.min(minuteOf(now, key), a.bed) : key < dayKey() ? a.bed : 0;
+  const assumed = (day?.plan || []).filter(b => b.fixed && b.cat !== 'unk' && b.start < cut && b.end > a.wake).map(b => ({ b, s: t0 + b.start * 60000 }));
   const rows = [...log.map(e => ({ e, s: e.start })), ...assumed].sort((x, y) => x.s - y.s);
-  html += `<section class="card"><h2>Journal</h2>${rows.length ? rows.map(r => r.b ? `<div class="alert"><span>${hm(r.b.start)}–${hm(Math.min(r.b.end, a.upto))}
-    · ${emojiOf(r.b)} ${esc(r.b.title)} (${fmtDur(Math.min(r.b.end, a.upto) - r.b.start)}) <span class="tag">contrainte · supposée faite</span></span>
+  html += `<section class="card"><h2>Journal</h2>${rows.length ? rows.map(r => r.b ? `<div class="alert"><span>${hm(r.b.start)}–${hm(Math.min(r.b.end, cut))}
+    · ${emojiOf(r.b)} ${esc(r.b.title)} (${fmtDur(Math.min(r.b.end, cut) - r.b.start)}) <span class="tag">contrainte · supposée faite</span></span>
     <span class="row tight"><button class="btn small" data-act="block-edit" data-id="${r.b.id}" aria-label="Modifier">✎</button></span></div>`
     : (e => `<div class="alert"><span>${new Date(e.start).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}–${new Date(e.end).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
     · ${emojiOf(e)} ${esc(e.title)} (${fmtDur((e.end - e.start) / 60000)})</span>
@@ -410,7 +411,7 @@ function modalEntry({ unplanned = false, gap = null, cat = 'etu', title = '' } =
       <label>En quelques mots <span class="muted">(facultatif)</span><input type="text" name="title" placeholder="Ex. je préparais à manger"></label>
       <p class="muted small">Touche ce qui correspond :</p>
       <div class="quick">${PICKABLE.map(c => `<button class="btn qbtn" name="cat" value="${c}">${CATS[c].emoji} ${SHORT[c]}</button>`).join('')}</div>
-      <button type="button" class="btn" data-act="gap-unknown" style="width:100%;margin-top:8px">❓ Je ne sais plus</button>
+      <button type="button" class="btn" data-act="gap-unknown" style="width:100%;margin-top:8px">⬛ Temps perdu <span class="muted">(réseaux sociaux, je ne sais plus…)</span></button>
       <details class="adj"><summary>Ajuster les heures</summary><div class="grid3"><label>De<input type="time" name="from" value="${toInput(gs)}" required></label><label>À<input type="time" name="to" value="${toInput(ge)}" required></label></div></details></form>`,
       f => saveEntry(f, ik));
     return;
@@ -454,7 +455,7 @@ function saveEntry(f, key, extra = {}) {
   if (z <= a) return alert('L\'heure de fin doit être après le début.');
   const s0 = new Date(key.replace(/-/g, '/')).getTime();
   let { cat, sub } = splitCat(f.cat), title = (f.title || '').trim();
-  if (extra.unknown) { cat = 'unk'; sub = undefined; title = 'Non identifié'; }
+  if (extra.unknown) { cat = 'unk'; sub = undefined; title = title || 'Non identifié'; }
   else if (!title && cat) title = CATS[sub || cat].label;
   update(st => { ensureDay(st, key).log.push({ id: uid(), cat, ...(sub ? { sub } : {}), title, goalId: null, start: s0 + a * 60000, end: s0 + z * 60000, dontKnow: !!extra.unknown }); });
 }
@@ -742,6 +743,7 @@ document.addEventListener('click', e => {
       input.addEventListener('input', () => {
         const c = classify(input.value);
         form.querySelectorAll('.qbtn').forEach(b => b.classList.toggle('sugg', b.value === c));
+        form.querySelector('[data-act=gap-unknown]').classList.toggle('sugg', c === 'lost');
       });
       break;
     }
