@@ -20,7 +20,10 @@ const EMPTY = { goals: [], plan: [], log: [] };
 /** Fenêtre d'éveil du jour : [réveil, coucher] en minutes. */
 export function dayWindow(state, key) {
   const d = state.days[key] || {}, s = state.settings;
-  const wake = d.wakeActual ?? d.wakePlanned ?? s.wake;
+  let wake = d.wakeActual ?? d.wakePlanned ?? s.wake;
+  // réveil confirmé mais un cours / ton travail commence avant : tu étais forcément réveillé à ce moment-là
+  if (d.wakeActual != null)
+    for (const b of d.plan || []) if (b.fixed && (b.cat === 'obl' || (b.cat === 'prod' && b.sub === 'trav')) && b.start < wake) wake = b.start;
   let bed = d.sleepPlanned ?? s.bed;
   if (bed <= wake) bed = 1440;
   return { wake, bed: Math.min(bed, 1440) };

@@ -167,14 +167,14 @@ function renderPlan() {
       const done = b.cat === 'prod' ? blockDone(st, key, b, now) : 0;
       return `<div class="block c-${subOf(b)}"><div class="t">${fmtHM(b.start)}<br>${fmtHM(b.end)}</div>
         <div class="grow"><b>${emojiOf(b)} ${esc(b.title)}</b>
-        <div class="muted">${b.fixed ? (IMPORTED.includes(b.source) ? 'calendrier' : 'contrainte') : 'proposé'}${b.dirty ? ' · ⏳ à envoyer' : ''}${b.ro ? ' · lecture seule' : ''}${done > 0 ? ` · fait ${fmtDur(done)}` : ''}</div></div>
+        <div class="muted">${b.fixed ? (IMPORTED.includes(b.source) ? 'calendrier' : 'créneau fixe') : 'proposé'}${b.dirty ? ' · ⏳ à envoyer' : ''}${b.ro ? ' · lecture seule' : ''}${done > 0 ? ` · fait ${fmtDur(done)}` : ''}</div></div>
         <div class="row tight">${!past && b.cat === 'prod' && key === dayKey() ? `<button class="btn small" data-act="start-block" data-id="${b.id}">▶</button>` : ''}
         <button class="btn small" data-act="block-edit" data-id="${b.id}">✎</button></div></div>`;
     }).join('') : '<p class="muted">Planning vide.</p>'}
-    <div class="row"><button class="btn" data-act="block-add">＋ Contrainte</button>
+    <div class="row"><button class="btn" data-act="block-add">＋ Créneau fixe</button>
     ${!past ? '<button class="btn primary" data-act="plan-gen">✨ Proposer un planning</button>' : ''}
     ${s.gcalClientId && key <= dayKey() && (day.plan.some(b => b.cat === 'prod' || b.dirty) || day.log.length || a.lostSegs.length) ? '<button class="btn" data-act="gcal-push">📅 Envoyer vers Google Agenda</button>' : ''}</div>
-    <p class="muted small">Les contraintes (cours, rendez-vous, transport…) sont respectées. Rien n'est déplacé sans ton accord.</p></section>`;
+    <p class="muted small">Les créneaux fixes (cours, rendez-vous, transport, travail…) sont respectés : l'app planifie tes études autour. Rien n'est déplacé sans ton accord.</p></section>`;
   return html;
 }
 
@@ -207,13 +207,13 @@ function renderBilan() {
       <button class="btn small" data-act="gap" data-ref="${g.start}-${g.end}">Identifier</button></div>`).join('')}</section>`;
 
   const day = st.days[key], log = (day?.log || []).slice().sort((x, y) => x.start - y.start);
-  // contraintes déjà passées : supposées faites, elles apparaissent dans le journal (✎ pour les corriger)
+  // créneaux fixes déjà passés : supposées faites, elles apparaissent dans le journal (✎ pour les corriger)
   const t0 = dayStartMs(key), hm = m => fmtHM(m);
   const cut = key === dayKey() ? Math.min(minuteOf(now, key), a.bed) : key < dayKey() ? a.bed : 0;
-  const assumed = (day?.plan || []).filter(b => b.fixed && b.cat !== 'unk' && b.start < cut && b.end > a.wake).map(b => ({ b, s: t0 + b.start * 60000 }));
+  const assumed = (day?.plan || []).filter(b => b.fixed && b.cat !== 'unk' && b.start < cut).map(b => ({ b, s: t0 + b.start * 60000 }));
   const rows = [...log.map(e => ({ e, s: e.start })), ...assumed].sort((x, y) => x.s - y.s);
   html += `<section class="card"><h2>Journal</h2>${rows.length ? rows.map(r => r.b ? `<div class="alert"><span>${hm(r.b.start)}–${hm(Math.min(r.b.end, cut))}
-    · ${emojiOf(r.b)} ${esc(r.b.title)} (${fmtDur(Math.min(r.b.end, cut) - r.b.start)}) <span class="tag">contrainte · supposée faite</span></span>
+    · ${emojiOf(r.b)} ${esc(r.b.title)} (${fmtDur(Math.min(r.b.end, cut) - r.b.start)}) <span class="tag">créneau fixe · supposé fait</span></span>
     <span class="row tight"><button class="btn small" data-act="block-edit" data-id="${r.b.id}" aria-label="Modifier">✎</button></span></div>`
     : (e => `<div class="alert"><span>${new Date(e.start).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}–${new Date(e.end).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
     · ${emojiOf(e)} ${esc(e.title)} (${fmtDur((e.end - e.start) / 60000)})</span>
@@ -311,7 +311,7 @@ function renderSettingsRaw() {
     <p class="muted small">Dans Google, survole les pastilles pour voir leur nom : seules ces 11 couleurs sont reconnues (Tomate, Flamant, Mandarine, Banane, Sauge, Basilic, Paon, Myrtille, Lavande, Raisin, Graphite). Les autres teintes sont traitées comme « sans couleur ».</p>
     ${duplicates(s.colors).length ? `<p class="warn">⚠️ ${duplicates(s.colors).map(([x, y]) => `${COLOR_META[x].label} et ${COLOR_META[y].label}`).join(' ; ')} ont la même couleur : Google ne pourra pas les distinguer.</p>` : ''}</section>
     <section class="card"><h2>Google Agenda</h2>
-    <p class="muted">Lecture de tes événements (cours, rendez-vous…) comme contraintes ; envoi des sessions de productivité dans un calendrier séparé « Mon temps », seulement quand tu le demandes.</p>
+    <p class="muted">Lecture de tes événements (cours, rendez-vous…) comme créneaux fixes ; envoi des sessions de productivité dans un calendrier séparé « Mon temps », seulement quand tu le demandes.</p>
     <label>Identifiant client Google <span class="small">(voir LISEZMOI)</span><input type="text" data-setting="gcalClientId" value="${esc(s.gcalClientId)}" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false"></label>
     <div class="row"><button class="btn primary" data-act="gcal-connect" ${s.gcalClientId ? '' : 'disabled'}>${gg.isConnected() ? 'Connecté ✓' : 'Se connecter à Google'}</button>
     <button class="btn" data-act="gcal-import" ${s.gcalClientId ? '' : 'disabled'}>Importer maintenant</button>
@@ -406,7 +406,7 @@ function modalEntry({ unplanned = false, gap = null, cat = 'etu', title = '' } =
     return;
   }
   if (gap) {
-    openModal('❓ Que faisais-tu ?', `<form data-submit="entry" data-day="${ik}">
+    openModal('❓ Que faisais-tu ?', `<form data-submit="entry" data-day="${ik}"><input type="hidden" name="gapref" value="${gs}-${ge}">
       <p><b>${fmtHM(gs)}–${fmtHM(ge)}</b> <span class="muted">· ${fmtDur(ge - gs)}</span></p>
       <label>En quelques mots <span class="muted">(facultatif)</span><input type="text" name="title" placeholder="Ex. je préparais à manger"></label>
       <p class="muted small">Touche ce qui correspond :</p>
@@ -450,14 +450,30 @@ function modalEntryEdit(id) {
   });
 }
 
+function openGap(ref) {
+  modalEntry({ gap: ref });
+  const form = modalEl.querySelector('form'), input = form.querySelector('input[name=title]');
+  input.addEventListener('input', () => {
+    const c = classify(input.value);
+    form.querySelectorAll('.qbtn').forEach(b => b.classList.toggle('sugg', b.value === c));
+    form.querySelector('[data-act=gap-unknown]').classList.toggle('sugg', c === 'lost');
+  });
+}
+/** Après avoir identifié une partie d'un trou : s'il en reste une partie, on pose tout de suite la question pour la suite. */
+function nextGap(key, a, z) {
+  const g = analyse(get(), key, Date.now()).gaps.find(x => x.start < z && x.end > a);
+  if (g) openGap(`${g.start}-${g.end}`);
+}
+
 function saveEntry(f, key, extra = {}) {
   const a = fromInput(f.from), z = fromInput(f.to);
-  if (z <= a) return alert('L\'heure de fin doit être après le début.');
+  if (z <= a) { alert('L\'heure de fin doit être après le début.'); return false; }
   const s0 = new Date(key.replace(/-/g, '/')).getTime();
   let { cat, sub } = splitCat(f.cat), title = (f.title || '').trim();
   if (extra.unknown) { cat = 'unk'; sub = undefined; title = title || 'Non identifié'; }
   else if (!title && cat) title = CATS[sub || cat].label;
   update(st => { ensureDay(st, key).log.push({ id: uid(), cat, ...(sub ? { sub } : {}), title, goalId: null, start: s0 + a * 60000, end: s0 + z * 60000, dontKnow: !!extra.unknown }); });
+  if (f.gapref) { const [gs, ge] = gapParse(f.gapref); setTimeout(() => nextGap(key, gs, ge), 0); }
 }
 
 function modalGoal(id) {
@@ -511,7 +527,7 @@ function modalStale() {
 
 function modalBlock(id) {
   const b = id ? get().days[ui.viewDay]?.plan.find(x => x.id === id) : null;
-  openModal(b ? 'Modifier le bloc' : 'Nouvelle contrainte', `<form data-submit="block" data-id="${id || ''}">
+  openModal(b ? 'Modifier le bloc' : 'Nouveau créneau fixe', `<form data-submit="block" data-id="${id || ''}">
     ${b && IMPORTED.includes(b.source) ? `<p class="muted small">📅 Cet événement vient de Google Agenda. ${!b.ro ? 'Au prochain <b>Envoyer</b>, il sera <b>modifié dans Google</b> (couleur, titre, heure).' : 'Son calendrier est en <b>lecture seule</b> : ta modification reste dans l\'app (statistiques) et ne change pas Google.'}</p>` : ''}
     <label>Titre<input type="text" name="title" value="${esc(b?.title)}" placeholder="Ex. Cours d'automatique" required></label>
     <div class="grid3"><label>De<input type="time" name="from" value="${toInput(b?.start ?? 9 * 60)}" required></label><label>À<input type="time" name="to" value="${toInput(b?.end ?? 10 * 60)}" required></label></div>
@@ -550,7 +566,7 @@ function modalPlanGen() {
   const key = ui.viewDay, p = propose(get(), key, Date.now());
   const list = p.add.length ? p.add.map(b => `<div class="alert"><span>${fmtHM(b.start)}–${fmtHM(b.end)} · ${emojiOf(b)} ${esc(b.title)}</span></div>`).join('')
     : '<p class="muted">Aucun objectif à placer. Ajoute des objectifs d\'abord.</p>';
-  openModal('✨ Planning proposé', `<p class="muted">Tient compte de tes contraintes, du sommeil, de tes préférences et de ce qui est déjà fait.</p>${list}
+  openModal('✨ Planning proposé', `<p class="muted">Tient compte de tes créneaux fixes, du sommeil, de tes préférences et de ce qui est déjà fait.</p>${list}
     ${p.unplaced.map(u => `<p class="warn">⚠️ Pas assez de place pour ${fmtDur(u.min)} de « ${esc(u.title)} ». Réduis l'objectif ou libère du temps.</p>`).join('')}
     <div class="row">${p.add.length || p.remove.length ? '<button class="btn primary" data-act="apply-proposal">Accepter</button>' : ''}<button class="btn" data-act="modal-close">Fermer</button></div>`);
   ui.modal.proposal = { key, p };
@@ -628,7 +644,7 @@ async function gcalPushDay(k, prov) {
   const a = analyse(st, k, Date.now());
   const mn = ms => Math.max(0, Math.min(1440, Math.round((ms - s0) / 60000)));
   const items = [
-    // sessions prévues pas encore faites + contraintes saisies dans l'app (rendez-vous, repas…) ; jamais les événements venant de Google
+    // sessions prévues pas encore faites + créneaux fixes saisis dans l'app (rendez-vous, repas…) ; jamais les événements venant de Google
     ...day.plan.filter(b => !IMPORTED.includes(b.source) && b.cat !== 'unk' && (b.fixed || (b.cat === 'prod' && blockDone(st, k, b, Date.now()) < (b.end - b.start) / 2)))
       .map(b => ({ id: b.id, start: b.start, end: b.end, summary: `${b.unplanned ? '⚡' : emojiOf(b)} ${b.title}`, colorId: col[b.unplanned ? 'imp' : subOf(b)] })),
     ...day.log.filter(e => e.cat !== 'unk' && !e.id.startsWith('g:') && mn(e.end) > mn(e.start))
@@ -737,16 +753,7 @@ document.addEventListener('click', e => {
       const d = s.days[ui.viewDay];
       if (d) { if (id.startsWith('g:')) (s.settings.tombstones ||= []).push(id.slice(2)); d.log = d.log.filter(x => x.id !== id); }   // venue de Google : sera aussi supprimée dans Google
     }); if (ui.modal) closeModal(); break;
-    case 'gap': {
-      modalEntry({ gap: t.dataset.ref || t.dataset.id });
-      const form = modalEl.querySelector('form'), input = form.querySelector('input[name=title]');
-      input.addEventListener('input', () => {
-        const c = classify(input.value);
-        form.querySelectorAll('.qbtn').forEach(b => b.classList.toggle('sugg', b.value === c));
-        form.querySelector('[data-act=gap-unknown]').classList.toggle('sugg', c === 'lost');
-      });
-      break;
-    }
+    case 'gap': openGap(t.dataset.ref || t.dataset.id); break;
     case 'gap-unknown': {
       const form = t.closest('form'), f = formData(form);
       if (saveEntry(f, form.dataset.day, { unknown: true }) === undefined) closeModal();
