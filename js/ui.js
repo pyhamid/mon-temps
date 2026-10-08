@@ -5,7 +5,7 @@ import {
 import {
   dayKey, dayStartMs, addDays, dayLabel, dayShort, minuteOf, fmtHM, fmtDur, fmtPct, fmtClock, toInput, fromInput, uid, ceil5,
 } from './time.js';
-import { CATS, PICKABLE, analyse, insights, patterns, hasData, sessionElapsed, blockDone, dayWindow, entriesOf } from './analysis.js';
+import { CATS, PICKABLE, analyse, insights, patterns, hasData, sessionElapsed, studyRate, blockDone, dayWindow, entriesOf } from './analysis.js';
 import { propose, applyProposal } from './planner.js';
 import { signals } from './signals.js';
 import { classify } from './classify.js';
@@ -74,7 +74,7 @@ function renderHome() {
 
   // Aujourd'hui
   const ratio = a.target ? Math.min(100, a.goalDone / a.target * 100) : 0;
-  html += `<section class="card"><h2>Aujourd'hui</h2>
+  html += `<section class="card"><h2>Aujourd'hui</h2>${rateBlock(a)}
     <div class="stats"><div><b>${fmtDur(a.target ? a.goalDone : a.focus)}</b><span>${a.target ? 'Fait' : 'Productif'}</span></div>
     <div><b>${a.target ? fmtDur(a.target) : '—'}</b><span>Objectif</span></div>
     <div><b>${fmtDur(a.availRemaining)}</b><span>Temps disponible restant</span></div></div>
@@ -93,6 +93,14 @@ function renderHome() {
 
   html += `<div class="row"><button class="btn" data-act="unplanned">⚡ Imprévu</button><button class="btn" data-act="entry-open">＋ Activité passée</button></div>`;
   return html;
+}
+
+/** Le chiffre clé : études ÷ temps disponible. */
+function rateBlock(a) {
+  const r = studyRate(a);
+  return `<div class="rate"><b>${r == null ? '—' : Math.round(r) + ' %'}</b><span>📚 du temps disponible consacré aux études</span>
+    <small>${r == null ? 'Pas encore assez de temps disponible pour calculer.' : `${fmtDur(a.sub.etu)} d'études sur ${fmtDur(a.availSoFar)} disponibles`}</small>
+    ${r == null ? '' : `<div class="bar"><i style="width:${Math.min(100, r)}%"></i></div>`}</div>`;
 }
 
 function alertRow(s) {
@@ -175,7 +183,7 @@ function renderBilan() {
   const st = get(), key = ui.viewDay, now = Date.now(), a = analyse(st, key, now);
   let html = dayNav();
   if (!hasData(st, key) && key !== dayKey()) return html + '<section class="card"><p class="muted">Pas de données pour ce jour.</p></section>';
-  html += `<section class="card"><h2>Journée du ${dayLabel(key)}</h2><p>Temps éveillé : <b>${fmtDur(a.awake)}</b></p>
+  html += `<section class="card"><h2>Journée du ${dayLabel(key)}</h2>${rateBlock(a)}<p>Temps éveillé : <b>${fmtDur(a.awake)}</b></p>
     ${['etu', 'trav', 'obl', 'vie', 'pause', 'loisir', 'unk'].map(c => { const v = c === 'etu' ? a.sub.etu : c === 'trav' ? a.sub.trav : a.cat[c]; return `
       <div class="line c-${c}"><div class="lh"><span>${catChip(c)}</span><b>${fmtDur(v)} — ${fmtPct(v, a.awake)}</b></div>
       <div class="bar"><i style="width:${a.awake ? v / a.awake * 100 : 0}%"></i></div></div>`; }).join('')}
@@ -207,6 +215,19 @@ function renderBilan() {
 }
 
 // ---------------------------------------------------------------- Semaine
+/** Évolution du taux d'étude sur 14 jours, avec moyenne des 7 derniers jours vs les 7 précédents. */
+function rateWeek(st, now, today) {
+  const rows = Array.from({ length: 14 }, (_, i) => { const k = addDays(today, i - 13); return { k, r: hasData(st, k) ? studyRate(analyse(st, k, now)) : null }; });
+  const avg = l => { const v = l.filter(x => x.r != null).map(x => x.r); return v.length ? v.reduce((x, y) => x + y, 0) / v.length : null; };
+  const cur = avg(rows.slice(7)), prev = avg(rows.slice(0, 7));
+  const trend = cur == null || prev == null ? '' : Math.abs(cur - prev) < 3 ? 'Stable par rapport aux 7 jours précédents.'
+    : cur > prev ? `En hausse : +${Math.round(cur - prev)} points par rapport aux 7 jours précédents.` : `En baisse : −${Math.round(prev - cur)} points par rapport aux 7 jours précédents.`;
+  return `<section class="card"><h2>📚 Taux d'étude</h2>
+    <div class="rate"><b>${cur == null ? '—' : Math.round(cur) + ' %'}</b><span>moyenne des 7 derniers jours (études ÷ temps disponible)</span><small>${trend}</small></div>
+    ${rows.map(({ k, r }) => `<div class="wk"><span class="d">${dayShort(k)}</span><div class="track">${r != null ? `<i class="p" style="width:${Math.min(100, r)}%"></i>` : ''}</div><b>${r != null ? Math.round(r) + ' %' : '—'}</b></div>`).join('')}
+    <p class="muted small">Un jour est compté seulement s'il a au moins 30 min de temps disponible.</p></section>`;
+}
+
 function renderWeek() {
   const st = get(), now = Date.now(), today = dayKey();
   const days = Array.from({ length: 7 }, (_, i) => addDays(today, i - 6));
@@ -214,7 +235,7 @@ function renderWeek() {
   const have = rows.filter(r => r.a);
   const sum = f => have.reduce((x, r) => x + f(r.a), 0);
   const maxProd = Math.max(60, ...have.map(r => Math.max(r.a.focus, r.a.target)));
-  let html = `<section class="card"><h2>Heures productives</h2>${rows.map(({ k, a }) => `
+  let html = rateWeek(st, now, today) + `<section class="card"><h2>Heures productives</h2>${rows.map(({ k, a }) => `
     <div class="wk"><span class="d">${dayShort(k)}</span>
     <div class="track">${a ? `<i class="p" style="width:${a.focus / maxProd * 100}%"></i>${a.target ? `<u style="left:${a.target / maxProd * 100}%" title="objectif"></u>` : ''}` : ''}</div>
     <b>${a ? fmtDur(a.focus) : '—'}</b></div>`).join('')}
