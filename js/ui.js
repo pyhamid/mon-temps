@@ -21,9 +21,10 @@ const ui = { tab: 'home', viewDay: dayKey(), modal: null, open: {} };
 // L'onglet et le jour affichés survivent à un rechargement (adresse #plan, #bilan…)
 try { const t = location.hash.slice(1); if (['home', 'plan', 'bilan', 'week', 'settings'].includes(t)) ui.tab = t; const v = sessionStorage.getItem('temps-vd'); if (/^\d{4}-\d\d-\d\d$/.test(v || '')) ui.viewDay = v; } catch { /* ignoré */ }
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const SHORT = { etu: 'Études', trav: 'Travail', obl: 'Obligation', vie: 'Quotidien', pause: 'Pause', loisir: 'Loisir' };
+const SHORT = { unk: 'Temps perdu', etu: 'Études', trav: 'Travail', obl: 'Obligation', vie: 'Quotidien', pause: 'Pause', loisir: 'Loisir' };
 /** Choix du sélecteur ('etu' | 'trav' | autre) → catégorie interne + type de travail productif. */
 const splitCat = v => (v === 'etu' || v === 'trav') ? { cat: 'prod', sub: v } : { cat: v };
+const goalBlock = b => b.cat === 'prod' || (b.cat === 'obl' && !!b.goalId);   // session d'objectif (études, travail ou obligation)
 const subOf = x => (x.cat === 'prod' ? (x.sub || 'etu') : x.cat);       // clé de couleur / d'emoji
 const emojiOf = x => CATS[subOf(x)].emoji;
 const catChip = c => `${CATS[c].emoji} ${CATS[c].label}`;
@@ -69,7 +70,7 @@ function renderHome() {
   const next = day.plan.find(b => b.start > nm && b.cat !== 'pause') || day.plan.find(b => b.start > nm);
   html += `<section class="card"><h2>Prochaine activité</h2>${next
     ? `<div class="act">${emojiOf(next)} ${esc(next.title)}</div><p class="muted">${fmtHM(next.start)}–${fmtHM(next.end)}</p>
-       ${next.cat === 'prod' ? `<button class="btn" data-act="start-block" data-id="${next.id}">▶ Commencer maintenant</button>` : ''}`
+       ${goalBlock(next) ? `<button class="btn" data-act="start-block" data-id="${next.id}">▶ Commencer maintenant</button>` : ''}`
     : '<p class="muted">Rien de prévu pour la suite. <a href="#" data-act="tab" data-tab="plan">Planifier</a></p>'}</section>`;
 
   // Aujourd'hui
@@ -134,7 +135,7 @@ function shortfallDue(g, key) {
 function goalRow(g, key, editable) {
   const gone = g.settled;
   return `<div class="goal ${gone ? 'settled' : ''}">
-    <div><b>${esc(g.title)}</b>${g.sub === 'trav' ? ' <span class="tag">💼 travail</span>' : ''}${g.hard ? ' <span class="tag">difficile</span>' : ''}
+    <div><b>${esc(g.title)}</b>${g.sub === 'trav' ? ' <span class="tag">💼 travail</span>' : g.sub === 'obl' ? ' <span class="tag">🔴 obligation</span>' : ''}${g.hard ? ' <span class="tag">difficile</span>' : ''}
     <div class="muted">Objectif ${fmtDur(g.target)} · Réalisé ${fmtDur(g.done)}${g.missing && !gone ? ` · Manque ${fmtDur(g.missing)}` : ''}
     ${gone === 'tomorrow' ? ' · reporté à demain' : gone === 'moved' ? ' · reporté à aujourd\'hui' : gone === 'abandoned' ? ' · abandonné' : ''}</div></div>
     <div class="row tight">${editable && !gone ? `<button class="btn small" data-act="start-goal" data-id="${g.id}">▶</button>
@@ -164,16 +165,16 @@ function renderPlan() {
 
   html += `<section class="card"><h2>🗓️ Planning</h2>
     ${day.plan.length ? day.plan.map(b => {
-      const done = b.cat === 'prod' ? blockDone(st, key, b, now) : 0;
+      const done = goalBlock(b) ? blockDone(st, key, b, now) : 0;
       return `<div class="block c-${subOf(b)}"><div class="t">${fmtHM(b.start)}<br>${fmtHM(b.end)}</div>
         <div class="grow"><b>${emojiOf(b)} ${esc(b.title)}</b>
         <div class="muted">${b.fixed ? (IMPORTED.includes(b.source) ? 'calendrier' : 'créneau fixe') : 'proposé'}${b.dirty ? ' · ⏳ à envoyer' : ''}${b.ro ? ' · lecture seule' : ''}${done > 0 ? ` · fait ${fmtDur(done)}` : ''}</div></div>
-        <div class="row tight">${!past && b.cat === 'prod' && key === dayKey() ? `<button class="btn small" data-act="start-block" data-id="${b.id}">▶</button>` : ''}
+        <div class="row tight">${!past && goalBlock(b) && key === dayKey() ? `<button class="btn small" data-act="start-block" data-id="${b.id}">▶</button>` : ''}
         <button class="btn small" data-act="block-edit" data-id="${b.id}">✎</button></div></div>`;
     }).join('') : '<p class="muted">Planning vide.</p>'}
     <div class="row"><button class="btn" data-act="block-add">＋ Créneau fixe</button>
     ${!past ? '<button class="btn primary" data-act="plan-gen">✨ Proposer un planning</button>' : ''}
-    ${s.gcalClientId && key <= dayKey() && (day.plan.some(b => b.cat === 'prod' || b.dirty) || day.log.length || a.lostSegs.length) ? '<button class="btn" data-act="gcal-push">📅 Envoyer vers Google Agenda</button>' : ''}</div>
+    ${s.gcalClientId && key <= dayKey() && (day.plan.some(b => goalBlock(b) || b.dirty) || day.log.length || a.lostSegs.length) ? '<button class="btn" data-act="gcal-push">📅 Envoyer vers Google Agenda</button>' : ''}</div>
     <p class="muted small">Les créneaux fixes (cours, rendez-vous, transport, travail…) sont respectés : l'app planifie tes études autour. Rien n'est déplacé sans ton accord.</p></section>`;
   return html;
 }
@@ -378,7 +379,7 @@ function modalStart(pre = {}) {
     }
   const chip = (c, t, g, emoji, sub = '') => `<button type="button" class="chip" data-act="quick-start" data-cat="${c}" data-sub="${sub}" data-title="${esc(t)}" data-goal="${g || ''}">${emoji} ${esc(t)}</button>`;
   openModal('Commencer', `<form data-submit="start">
-    ${goals.length ? `<p class="muted small">Un appui pour démarrer :</p><div class="chips">${goals.map(g => chip('prod', g.title, g.id, g.sub === 'trav' ? '💼' : '📚', g.sub || 'etu')).join('')}</div>` : ''}
+    ${goals.length ? `<p class="muted small">Un appui pour démarrer :</p><div class="chips">${goals.map(g => chip(g.sub === 'obl' ? 'obl' : 'prod', g.title, g.id, g.sub === 'trav' ? '💼' : g.sub === 'obl' ? '🔴' : '📚', g.sub === 'obl' ? '' : g.sub || 'etu')).join('')}</div>` : ''}
     ${recents.length ? `<p class="muted small">Récents :</p><div class="chips">${recents.map(e => chip(e.cat, e.title, '', emojiOf(e), e.sub || '')).join('')}</div>` : ''}
     <p class="muted small">${goals.length || recents.length ? 'Ou autre chose :' : 'Que commences-tu ?'}</p>
     ${catRadios(pre.cat || 'etu')}
@@ -419,18 +420,18 @@ function modalEntry({ unplanned = false, gap = null, cat = 'etu', title = '' } =
   openModal('Ajouter une activité', `<form data-submit="entry" data-day="${ik}">
     <label>Nom<input type="text" name="title" required></label>
     <div class="grid3"><label>De<input type="time" name="from" value="${toInput(gs)}" required></label><label>À<input type="time" name="to" value="${toInput(ge)}" required></label></div>
-    ${catRadios(cat)}
+    ${catRadios(cat, [...PICKABLE, 'unk'])}
     <button class="btn primary big">Ajouter</button></form>`, f => saveEntry(f, ik));
 }
 
 function modalEntryEdit(id) {
   const e = (get().days[ui.viewDay]?.log || []).find(x => x.id === id);
   if (!e) return;
-  const cats = e.cat === 'unk' ? [...PICKABLE] : PICKABLE;
+  const cats = [...PICKABLE, 'unk'];
   openModal('Modifier', `<form data-submit="entry-edit" data-id="${id}">
     <label>Nom<input type="text" name="title" value="${esc(e.title)}"></label>
     <div class="grid3"><label>De<input type="time" name="from" value="${toInput(minuteOf(e.start, ui.viewDay))}" required></label><label>À<input type="time" name="to" value="${toInput(minuteOf(e.end, ui.viewDay))}" required></label></div>
-    <p class="muted small">Type :</p>${catRadios(e.cat === 'unk' ? '' : subOf(e), cats)}
+    <p class="muted small">Type :</p>${catRadios(e.cat === 'unk' && !e.dontKnow ? '' : subOf(e), cats)}
     ${e.id.startsWith('g:') ? '<p class="muted small">📅 Créée dans Google Agenda : au prochain <b>Envoyer</b>, elle y sera mise à jour.</p>' : ''}
     <div class="row"><button class="btn primary">Enregistrer</button><button type="button" class="btn danger" data-act="entry-del" data-id="${id}">Supprimer</button></div></form>`, f => {
     if (!f.cat) return alert('Choisis un type.');
@@ -445,7 +446,8 @@ function modalEntryEdit(id) {
       if (x.id.startsWith('g:')) x.dirty = true;                       // activité venue de Google : à renvoyer
       const sp = splitCat(f.cat);
       x.cat = sp.cat; if (sp.sub) x.sub = sp.sub; else delete x.sub;
-      x.title = f.title.trim() || CATS[sp.sub || sp.cat].label; delete x.dontKnow;
+      x.title = f.title.trim() || (sp.cat === 'unk' ? 'Temps perdu' : CATS[sp.sub || sp.cat].label);
+      if (sp.cat === 'unk') x.dontKnow = true; else delete x.dontKnow;
     });
   });
 }
@@ -471,6 +473,7 @@ function saveEntry(f, key, extra = {}) {
   const s0 = new Date(key.replace(/-/g, '/')).getTime();
   let { cat, sub } = splitCat(f.cat), title = (f.title || '').trim();
   if (extra.unknown) { cat = 'unk'; sub = undefined; title = title || 'Non identifié'; }
+  else if (cat === 'unk') { extra = { ...extra, unknown: true }; title = title || 'Temps perdu'; }
   else if (!title && cat) title = CATS[sub || cat].label;
   update(st => { ensureDay(st, key).log.push({ id: uid(), cat, ...(sub ? { sub } : {}), title, goalId: null, start: s0 + a * 60000, end: s0 + z * 60000, dontKnow: !!extra.unknown }); });
   if (f.gapref) { const [gs, ge] = gapParse(f.gapref); setTimeout(() => nextGap(key, gs, ge), 0); }
@@ -481,7 +484,7 @@ function modalGoal(id) {
   openModal(g ? 'Modifier l\'objectif' : 'Nouvel objectif', `<form data-submit="goal" data-id="${id || ''}">
     <label>Matière / projet<input type="text" name="title" value="${esc(g?.title)}" placeholder="Ex. Traitement du signal" required></label>
     <label>Durée visée (heures)<input type="number" name="h" step="0.25" min="0.25" max="12" value="${g ? g.target / 60 : 1}" required></label>
-    <div class="cats"><label><input type="radio" name="sub" value="etu" ${(g?.sub || 'etu') === 'etu' ? 'checked' : ''}><span>📚 Études</span></label><label><input type="radio" name="sub" value="trav" ${g?.sub === 'trav' ? 'checked' : ''}><span>💼 Travail</span></label></div>
+    <div class="cats"><label><input type="radio" name="sub" value="etu" ${(g?.sub || 'etu') === 'etu' ? 'checked' : ''}><span>📚 Études</span></label><label><input type="radio" name="sub" value="trav" ${g?.sub === 'trav' ? 'checked' : ''}><span>💼 Travail</span></label><label><input type="radio" name="sub" value="obl" ${g?.sub === 'obl' ? 'checked' : ''}><span>🔴 Obligation</span></label></div>
     <label class="check"><input type="checkbox" name="hard" ${g?.hard ? 'checked' : ''}> Matière difficile (placée en premier)</label>
     <label class="check"><input type="checkbox" name="rec" ${g?.recurId ? 'checked' : ''}> Répéter chaque jour de la semaine (lun–ven)</label>
     <div class="row"><button class="btn primary">Enregistrer</button>${g ? '<button type="button" class="btn danger" data-act="goal-del">Supprimer</button>' : ''}</div></form>`, f => {
@@ -645,7 +648,7 @@ async function gcalPushDay(k, prov) {
   const mn = ms => Math.max(0, Math.min(1440, Math.round((ms - s0) / 60000)));
   const items = [
     // sessions prévues pas encore faites + créneaux fixes saisis dans l'app (rendez-vous, repas…) ; jamais les événements venant de Google
-    ...day.plan.filter(b => !IMPORTED.includes(b.source) && b.cat !== 'unk' && (b.fixed || (b.cat === 'prod' && blockDone(st, k, b, Date.now()) < (b.end - b.start) / 2)))
+    ...day.plan.filter(b => !IMPORTED.includes(b.source) && b.cat !== 'unk' && (b.fixed || (goalBlock(b) && blockDone(st, k, b, Date.now()) < (b.end - b.start) / 2)))
       .map(b => ({ id: b.id, start: b.start, end: b.end, summary: `${b.unplanned ? '⚡' : emojiOf(b)} ${b.title}`, colorId: col[b.unplanned ? 'imp' : subOf(b)] })),
     ...day.log.filter(e => e.cat !== 'unk' && !e.id.startsWith('g:') && mn(e.end) > mn(e.start))
       .map(e => ({ id: `log:${e.id}`, start: mn(e.start), end: mn(e.end), summary: `${e.unplanned ? '⚡' : emojiOf(e)} ${e.title}`, colorId: col[e.unplanned ? 'imp' : subOf(e)] })),
@@ -736,7 +739,7 @@ document.addEventListener('click', e => {
     case 'stale': modalStale(); break;
     case 'stop-now': stopSession(); closeModal(); break;
     case 'tab-settings': ui.tab = 'settings'; render(); break;
-    case 'start-goal': { const g = goalOf(id); if (g) startActivity({ cat: 'prod', sub: g.sub || 'etu', title: g.title, goalId: g.id }); break; }
+    case 'start-goal': { const g = goalOf(id); if (g) startActivity(g.sub === 'obl' ? { cat: 'obl', title: g.title, goalId: g.id } : { cat: 'prod', sub: g.sub || 'etu', title: g.title, goalId: g.id }); break; }
     case 'start-block': {
       const b = (st.days[key]?.plan || []).find(x => x.id === id);
       if (b) startActivity({ cat: b.cat, sub: b.sub, title: b.title, goalId: b.goalId || null });

@@ -21,9 +21,10 @@ export function signals(state, nowMs = Date.now()) {
       text: `Ta pause prévue de ${fmtDur(cur.plannedMin)} est terminée (${fmtDur((nowMs - cur.start) / 60000)} écoulées). On reprend quand tu veux.` });
 
   // Fin de session
-  if (cur && cur.cat === 'prod') {
+  const isG = x => x.cat === 'prod' || (x.cat === 'obl' && !!x.goalId);
+  if (cur && isG(cur)) {
     const cm = minuteOf(cur.start, key);
-    const b = day.plan.find(x => x.cat === 'prod' && x.start <= cm + 5 && cm < x.end && (!x.goalId || x.goalId === cur.goalId));
+    const b = day.plan.find(x => isG(x) && x.start <= cm + 5 && cm < x.end && (!x.goalId || x.goalId === cur.goalId));
     const long = sessionElapsed(state, nowMs) / 60000 >= state.settings.session;
     if ((b && nowM >= b.end) || (!b && long))
       out.push({ id: `end:${cur.sid}:${b?.id || ''}`, type: 'end', icon: '⏰', notify: true, action: 'stop',
@@ -33,7 +34,7 @@ export function signals(state, nowMs = Date.now()) {
   // Rappels de début et retards (uniquement si rien de productif n'est en cours)
   if (!cur || cur.cat === 'pause') {
     for (const b of day.plan) {
-      if (b.cat !== 'prod' || b.end <= nowM || (b.fixed && b.sub === 'trav')) continue;
+      if (!isG(b) || b.end <= nowM || (b.fixed && b.sub === 'trav')) continue;
       const started = blockDone(state, key, b, nowMs) > 0;
       if (started) continue;
       if (nowM >= b.start && nowM < b.start + 10)
@@ -56,7 +57,7 @@ export function signals(state, nowMs = Date.now()) {
   }));
 
   // Planning perturbé
-  const bad = day.plan.filter(b => b.source === 'auto' && b.cat === 'prod' && b.end > 0 &&
+  const bad = day.plan.filter(b => b.source === 'auto' && isG(b) && b.end > 0 &&
     ((b.end <= nowM && blockDone(state, key, b, nowMs) < (b.end - b.start) / 2) || (b.start < a.wake && b.end > nowM)));
   if (bad.length)
     out.push({ id: `reorg:${key}:${bad.map(b => b.id).join(',')}`, type: 'reorg', icon: '⚠️', notify: true, action: 'reorg',

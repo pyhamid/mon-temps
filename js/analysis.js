@@ -10,7 +10,7 @@ export const CATS = {
   trav:   { emoji: '💼', label: 'Travail' },
   pause:  { emoji: '🌿', label: 'Pause / repos' },
   loisir: { emoji: '🎮', label: 'Divertissement volontaire' },
-  unk:    { emoji: '❓', label: 'Non identifié' },
+  unk:    { emoji: '⬛', label: 'Non identifié' },
   imp:    { emoji: '⚡', label: 'Imprévus' },
 };
 export const PICKABLE = ['etu', 'trav', 'obl', 'vie', 'pause', 'loisir'];
@@ -45,7 +45,7 @@ export function hasData(state, key) {
 export function goalProgress(state, key, nowMs) {
   const s0 = dayStartMs(key), s1 = s0 + 86400000, out = {};
   for (const e of entriesOf(state, key, nowMs)) {
-    if (e.cat !== 'prod' || !e.goalId) continue;
+    if ((e.cat !== 'prod' && e.cat !== 'obl') || !e.goalId) continue;
     const t = Math.min(e.end, s1) - Math.max(e.start, s0);
     if (t > 0) out[e.goalId] = (out[e.goalId] || 0) + t / 60000;
   }
@@ -150,7 +150,7 @@ export function analyse(state, key, nowMs = Date.now()) {
   for (const e of entriesOf(state, key, nowMs)) {
     if (e.cat !== 'unk' || !e.dontKnow) continue;
     const a = Math.max(0, Math.round((e.start - s0) / 60000)), z = Math.min(1440, Math.round((e.end - s0) / 60000));
-    if (z > a) lostSegs.push({ id: `lost:${e.id}`, start: a, end: z, title: 'Temps perdu' });
+    if (z > a) lostSegs.push({ id: `lost:${e.id}`, start: a, end: z, title: e.title && e.title !== 'Non identifié' ? e.title : 'Temps perdu' });
   }
   lostSegs.sort((x, y) => x.start - y.start);
 

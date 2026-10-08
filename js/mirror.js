@@ -81,13 +81,17 @@ export function applyMirror(st, events, classify, { fromMs, toMs, uid }) {
       else if (!appWins(loc.en, e) && !same(loc.en, e, k)) { apply(loc.en, e, k); rehome(loc); stat.updated++; }
     } else if (item.startsWith('lost:')) {              // « je ne sais plus » : recolorié = identifié
       const loc = locate(item.slice(5));
+      if (loc && k.cat === 'unk') {                     // toujours du temps perdu : on garde le nom donné dans Google
+        const t = stripEmoji(e.title.replace(/^\s*⬛\s*/, ''));
+        if (t && t !== 'Temps perdu' && t !== loc.en.title && !appWins(loc.en, e)) { loc.en.title = t; stat.updated++; }
+      }
       if (loc && k.cat !== 'unk') { apply(loc.en, e, k); rehome(loc); delete d.gcal[item]; stat.updated++; }
     } else if (item.startsWith('gap:')) {               // trou noir recolorié = identifié
       if (k.cat !== 'unk') { newEntry(e, k, `g:${e.id}`); delete d.gcal[item]; stat.created++; }
     } else {                                            // session planifiée
       const b = d.plan.find(x => x.id === item);
       if (!b || appWins(b, e)) continue;
-      if (k.cat === 'prod' || b.fixed) {
+      if (k.cat === 'prod' || b.fixed || (b.goalId && k.cat === 'obl')) {
         const nk = dayKey(new Date(e.start)), s = minutes(e.start, nk), z = minutes(e.end, nk);
         const t = stripEmoji(e.title) || b.title;
         if (nk === r.dk) {
