@@ -163,4 +163,5 @@ main > *, .card, .sheet, .goal, .block, .alert { min-width: 0; }
 .rate { text-align: center; padding: 4px 0 10px; }
 .rate b { display: block; font-size: 2.6rem; line-height: 1.1; color: var(--accent, #6366f1); }
 .rate span { display: block; font-weight: 600; font-size: .9rem; }
+.rate2 { margin-top: 6px; font-size: .9rem; color: var(--muted); } .rate2 b { color: var(--c-prep, var(--accent)); font-size: 1.15rem; }
 .rate small { display: block; color: var(--muted); font-size: .8rem; margin: 2px 0 6px; }
