@@ -86,7 +86,7 @@ function renderHome() {
   const sigs = signals(st, now);
   if (!empty && !day.goals.length && !day.plan.length && nm < a.bed)
     sigs.push({ icon: '🗒️', text: 'Aucun objectif pour aujourd\'hui. Définis-les dans l\'onglet Planning pour obtenir un planning proposé.', action: 'tab-plan' });
-  if (ui.gcalTap) sigs.unshift({ icon: '📅', text: 'Google Agenda n\'est pas à jour. Un appui pour synchroniser.', action: 'gcal-sync' });
+  if (ui.gcalTap) sigs.unshift({ icon: '📅', text: `Google Agenda n'est pas à jour${ui.gcalErr ? ` (${ui.gcalErr})` : ''}. Un appui pour synchroniser.`, action: 'gcal-sync' });
   const used = Object.keys(st.days).filter(k => st.days[k].log.length).length;
   if (used >= 3 && Date.now() - st.settings.lastBackup > 14 * 86400000)
     sigs.push({ icon: '💾', text: 'Sauvegarde conseillée : tes données ne sont que sur cet appareil (Réglages, puis Exporter).', action: 'tab-settings' });
@@ -608,7 +608,7 @@ async function syncSub(manual) {
 }
 
 /** Lit Google Agenda (8 jours) et remplace les blocs importés. interactive = fenêtre Google autorisée (après un clic). */
-let gcalBusy = false, resync = false, inSys = false;
+let gcalBusy = false, inSys = false;
 /** Modification faite par la synchro elle-même (ne doit pas redéclencher une synchro). */
 const sysUpdate = fn => { inSys = true; try { update(fn); } finally { inSys = false; } };
 const BACK_DAYS = 30;                 // jours passés relus à chaque import
@@ -649,29 +649,33 @@ async function gcalImport({ interactive = false, notify = false } = {}) {
 async function gcalAutoSync({ interactive = false } = {}) {
   const clientId = get().settings.gcalClientId;
   if (!clientId || gcalBusy) return;
-  gcalBusy = true;
+  gcalBusy = true; ui.lastTry = Date.now();
+  let step = 'connexion';
   try {
     if (!gg.isConnected()) await gg.connect(clientId, { silent: !interactive });
-    await gcalReadAll();
+    step = 'lecture';
+    try { await gcalReadAll(); } catch (e) { if (/connect|autoris|permission|401|403/i.test(e.message)) throw e; ui.readErr = e.message; }   // une lecture ratée n'empêche pas l'envoi
+    step = 'envoi';
     const prov = new gg.GoogleCalendarProvider(get().settings.gcalId), today = dayKey();
     for (let i = 6; i >= 0; i--) { const dk = addDays(today, -i); if (i === 0 || userDay(get().days[dk])) await gcalPushDay(dk, prov); }
     await gcalWriteBack(prov);
-    sysUpdate(s => { s.settings.gcalSync = Date.now(); s.settings.gcalMsg = 'importé et envoyé'; });
-    ui.gcalTap = false;
+    sysUpdate(s => { s.settings.gcalSync = Date.now(); s.settings.gcalMsg = ui.readErr ? `envoyé (lecture impossible : ${ui.readErr})` : 'importé et envoyé'; });
+    ui.readErr = ''; ui.gcalTap = false; ui.gcalErr = '';
   } catch (e) {
+    ui.gcalErr = `${step} : ${e.message}`;
     if (interactive) alert(e.message);
-    else if (get().settings.gcalLinked) { ui.gcalTap = true; if (!ui.modal) render(); }   // il faudra un appui pour renouveler l'accès
-  } finally { gcalBusy = false; if (resync) { resync = false; gcalSoon(); } }
+    else { ui.gcalTap = true; dirtyAt = Date.now() + 90000; sysUpdate(s => { s.settings.gcalMsg = `échec (${ui.gcalErr})`; }); }   // nouvel essai dans ~2 min
+  } finally { gcalBusy = false; }
 }
-let syncTimer = null;
-/** Quelques secondes après chaque modification (ajout, correction, fin de chrono…), envoie tout vers Google. */
-const gcalSoon = () => {
-  const s = get().settings;
-  if (!s.gcalAuto || !s.gcalLinked || !s.gcalClientId || ui.gcalTap) return;
-  if (gcalBusy) { resync = true; return; }                // modifié pendant une synchro : on repartira juste après
-  if (syncTimer) return;                                  // une synchro est déjà prévue
-  syncTimer = setTimeout(() => { syncTimer = null; gcalAutoSync(); }, 30000);
-};
+let dirtyAt = 0;           // dernière modification pas encore envoyée à Google (0 = rien en attente)
+/** À chaque modification faite par toi : l'envoi vers Google part dans ~10 s (ou tout de suite si tu quittes l'app). */
+const gcalSoon = () => { dirtyAt = dirtyAt || Date.now(); };
+const gcalEligible = () => { const s = get().settings; return s.gcalAuto && s.gcalLinked && s.gcalClientId && !gcalBusy && (gg.isConnected() || Date.now() - (ui.lastTry || 0) > 120000); };
+/** Appelé toutes les 30 s et au retour dans l'app. */
+function gcalTick() {
+  if (!gcalEligible()) return;
+  if ((dirtyAt && Date.now() - dirtyAt > 10000) || (gcalDue() && Date.now() - (ui.lastTry || 0) > 90000)) { dirtyAt = 0; gcalAutoSync(); }
+}
 /** Au démarrage / retour dans l'app : si le compte est déjà autorisé, renouvelle l'accès sans rien demander (puis synchronise si c'est dû). */
 async function gcalStart() {
   const s = get().settings;
@@ -680,9 +684,9 @@ async function gcalStart() {
     try { await gg.connect(s.gcalClientId, { silent: true }); ui.gcalTap = false; }
     catch { ui.gcalTap = true; if (!ui.modal) render(); return; }
   }
-  if (gcalDue() || !get().settings.gcalSync) gcalAutoSync(); else if (!ui.modal) render();
+  if (gcalDue() || !get().settings.gcalSync) { dirtyAt = 0; gcalAutoSync(); } else if (!ui.modal) render();
 }
-const gcalDue = () => { const st = get().settings; return st.gcalAuto && st.gcalLinked && st.gcalClientId && !ui.gcalTap && Date.now() - st.gcalSync > 15 * 60000; };
+const gcalDue = () => { const st = get().settings; return st.gcalAuto && st.gcalLinked && st.gcalClientId && Date.now() - st.gcalSync > 15 * 60000; };
 
 const userDay = d => !!d && (d.log.length > 0 || d.wakeActual != null || d.goals.length > 0);
 
@@ -864,7 +868,7 @@ document.addEventListener('click', e => {
       closeModal(); break;
     }
     case 'ics-sync': syncSub(true); break;
-    case 'gcal-connect': gcalRun(async () => { await gg.connect(st.settings.gcalClientId); update(s => { s.settings.gcalLinked = true; }); }); break;
+    case 'gcal-connect': gcalRun(async () => { await gg.connect(st.settings.gcalClientId); ui.gcalTap = false; update(s => { s.settings.gcalLinked = true; }); gcalAutoSync(); }); break;
     case 'gcal-import': gcalImport({ interactive: true, notify: true }); break;
     case 'gcal-sync': gcalAutoSync({ interactive: true }); break;
     case 'color-set': update(s => { s.settings.colors[t.dataset.key] = t.dataset.id; }); break;
@@ -939,8 +943,8 @@ subscribe(() => { if (!inSys) gcalSoon(); if (!ui.modal) render(); });
 const typing = () => /INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName || '');
 setInterval(tick, 1000);
 const subDue = () => { const st = get().settings; return st.icsUrl && Date.now() - st.icsSync > 30 * 60000; };
-setInterval(() => { ensureRecurring(dayKey()); if (subDue()) syncSub(false); if (gcalDue()) gcalAutoSync(); notify.check(); if (!ui.modal && !typing() && !document.hidden) render(); }, 30000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { gcalStart(); notify.check(); if (!ui.modal) render(); } });
+setInterval(() => { ensureRecurring(dayKey()); if (subDue()) syncSub(false); gcalTick(); notify.check(); if (!ui.modal && !typing() && !document.hidden) render(); }, 30000);
+document.addEventListener('visibilitychange', () => { if (document.hidden) { if (dirtyAt && gcalEligible()) { dirtyAt = 0; gcalAutoSync(); } } else { gcalStart(); notify.check(); if (!ui.modal) render(); } });
 ensureRecurring(dayKey());
 if (get().settings.gcalClientId) gg.preload();
 setTimeout(gcalStart, 1500);                      // laisse le temps au service Google de se charger
