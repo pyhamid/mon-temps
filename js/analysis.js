@@ -230,6 +230,8 @@ export function patterns(state, key, nowMs = Date.now()) {
 }
 
 /** Taux d'étude = temps d'études ÷ temps réellement disponible (en %), ou null s'il n'y a pas assez de temps disponible pour que ce soit parlant. */
+/** Taux de préparation = temps de préparation des études ÷ temps réellement disponible (en %). Calculé à part : n'entre jamais dans le taux d'étude. */
+export const prepRate = a => (a && a.availSoFar >= 30 ? a.cat.prep / a.availSoFar * 100 : null);
 export const studyRate = a => (a && a.availSoFar >= 30 ? a.sub.etu / a.availSoFar * 100 : null);
 
 export { fmtHM, fmtPct };

@@ -5,7 +5,7 @@ import {
 import {
   dayKey, dayStartMs, addDays, dayLabel, dayShort, minuteOf, fmtHM, fmtDur, fmtPct, fmtClock, toInput, fromInput, uid, ceil5,
 } from './time.js';
-import { CATS, PICKABLE, analyse, insights, patterns, hasData, sessionElapsed, studyRate, blockDone, dayWindow, entriesOf } from './analysis.js';
+import { CATS, PICKABLE, analyse, insights, patterns, hasData, sessionElapsed, studyRate, prepRate, blockDone, dayWindow, entriesOf } from './analysis.js';
 import { checkIns } from './remind.js';
 import { propose, applyProposal } from './planner.js';
 import { signals } from './signals.js';
@@ -101,10 +101,11 @@ function renderHome() {
 
 /** Le chiffre clé : études ÷ temps disponible. */
 function rateBlock(a) {
-  const r = studyRate(a);
+  const r = studyRate(a), p = prepRate(a);
   return `<div class="rate"><b>${r == null ? '—' : Math.round(r) + ' %'}</b><span>📚 du temps disponible consacré aux études</span>
     <small>${r == null ? 'Pas encore assez de temps disponible pour calculer.' : `${fmtDur(a.sub.etu)} d'études sur ${fmtDur(a.availSoFar)} disponibles`}</small>
-    ${r == null ? '' : `<div class="bar"><i style="width:${Math.min(100, r)}%"></i></div>`}</div>`;
+    ${r == null ? '' : `<div class="bar"><i style="width:${Math.min(100, r)}%"></i></div>`}
+    <div class="rate2"><b>${p == null ? '—' : Math.round(p) + ' %'}</b> <span>🗂️ en préparation des études${p == null ? '' : ` (${fmtDur(a.cat.prep)})`}</span></div></div>`;
 }
 
 function alertRow(s) {
@@ -229,13 +230,15 @@ function renderBilan() {
 // ---------------------------------------------------------------- Semaine
 /** Évolution du taux d'étude sur 14 jours, avec moyenne des 7 derniers jours vs les 7 précédents. */
 function rateWeek(st, now, today) {
-  const rows = Array.from({ length: 14 }, (_, i) => { const k = addDays(today, i - 13); return { k, r: hasData(st, k) ? studyRate(analyse(st, k, now)) : null }; });
+  const rows = Array.from({ length: 14 }, (_, i) => { const k = addDays(today, i - 13); const an = hasData(st, k) ? analyse(st, k, now) : null; return { k, r: studyRate(an), p: prepRate(an) }; });
   const avg = l => { const v = l.filter(x => x.r != null).map(x => x.r); return v.length ? v.reduce((x, y) => x + y, 0) / v.length : null; };
   const cur = avg(rows.slice(7)), prev = avg(rows.slice(0, 7));
+  const avgP = l => { const v = l.filter(x => x.p != null).map(x => x.p); return v.length ? v.reduce((x, y) => x + y, 0) / v.length : null; }, curP = avgP(rows.slice(7));
   const trend = cur == null || prev == null ? '' : Math.abs(cur - prev) < 3 ? 'Stable par rapport aux 7 jours précédents.'
     : cur > prev ? `En hausse : +${Math.round(cur - prev)} points par rapport aux 7 jours précédents.` : `En baisse : −${Math.round(prev - cur)} points par rapport aux 7 jours précédents.`;
   return `<section class="card"><h2>📚 Taux d'étude</h2>
-    <div class="rate"><b>${cur == null ? '—' : Math.round(cur) + ' %'}</b><span>moyenne des 7 derniers jours (études ÷ temps disponible)</span><small>${trend}</small></div>
+    <div class="rate"><b>${cur == null ? '—' : Math.round(cur) + ' %'}</b><span>moyenne des 7 derniers jours (études ÷ temps disponible)</span><small>${trend}</small>
+    <div class="rate2"><b>${curP == null ? '—' : Math.round(curP) + ' %'}</b> <span>🗂️ en préparation des études (moyenne 7 jours)</span></div></div>
     ${rows.map(({ k, r }) => `<div class="wk"><span class="d">${dayShort(k)}</span><div class="track">${r != null ? `<i class="p" style="width:${Math.min(100, r)}%"></i>` : ''}</div><b>${r != null ? Math.round(r) + ' %' : '—'}</b></div>`).join('')}
     <p class="muted small">Un jour est compté seulement s'il a au moins 30 min de temps disponible.</p></section>`;
 }
