@@ -7,13 +7,14 @@ export const CATS = {
   vie:    { emoji: '🧹', label: 'Vie quotidienne' },
   prod:   { emoji: '🎯', label: 'Productivité' },
   etu:    { emoji: '📚', label: 'Études' },
+  prep:   { emoji: '🗂️', label: 'Préparation études' },
   trav:   { emoji: '💼', label: 'Travail' },
   pause:  { emoji: '🌿', label: 'Pause / repos' },
   loisir: { emoji: '🎮', label: 'Divertissement volontaire' },
   unk:    { emoji: '⬛', label: 'Non identifié' },
   imp:    { emoji: '⚡', label: 'Imprévus' },
 };
-export const PICKABLE = ['etu', 'trav', 'obl', 'vie', 'pause', 'loisir'];
+export const PICKABLE = ['etu', 'prep', 'trav', 'obl', 'vie', 'pause', 'loisir'];
 
 const EMPTY = { goals: [], plan: [], log: [] };
 
@@ -93,7 +94,7 @@ export function analyse(state, key, nowMs = Date.now()) {
 
   // blocs fixes (cours, imprévus, temps perdu… venant du calendrier ou saisis à la main)
   for (const b of day.plan)
-    if (b.fixed && (['obl', 'vie', 'pause', 'loisir', 'unk', 'prod'].includes(b.cat)))
+    if (b.fixed && (['obl', 'vie', 'pause', 'loisir', 'unk', 'prep', 'prod'].includes(b.cat)))
       for (let m = Math.max(0, b.start); m < Math.min(b.end, 1440); m++) {
         fixed[m] = b.cat === 'prod' ? (b.sub === 'trav' ? 'trav' : 'etuf') : b.cat;
         if (b.cat === 'unk') fixedLost[m] = true;
@@ -118,7 +119,7 @@ export function analyse(state, key, nowMs = Date.now()) {
       pauseOver.push({ planned: e.plannedMin, actual: dur });
   }
 
-  const cat = { prod: 0, obl: 0, vie: 0, pause: 0, loisir: 0, unk: 0 };
+  const cat = { prod: 0, obl: 0, vie: 0, prep: 0, pause: 0, loisir: 0, unk: 0 };
   let unkPending = 0, unkLost = 0, impMin = 0, gapStart = null;
   const sub = { etu: 0, trav: 0 };
   let focus = 0;                                        // temps productif réellement chronométré
@@ -159,7 +160,7 @@ export function analyse(state, key, nowMs = Date.now()) {
   // Temps disponible = éveillé, hors cours & travail, obligations et vie quotidienne
   const availSoFar = Math.max(0, awake - cat.obl - cat.vie - sub.trav);
   const availTotal = Math.max(0, (bed - wake) - cat.obl - futObl - cat.vie - futVie - sub.trav - futTrav);
-  const used = sub.etu + cat.pause + cat.loisir + cat.unk;
+  const used = sub.etu + cat.prep + cat.pause + cat.loisir + cat.unk;
 
   // objectifs
   const prog = goalProgress(state, key, nowMs);

@@ -22,7 +22,7 @@ const ui = { tab: 'home', viewDay: dayKey(), modal: null, open: {} };
 // L'onglet et le jour affichés survivent à un rechargement (adresse #plan, #bilan…)
 try { const t = location.hash.slice(1); if (['home', 'plan', 'bilan', 'week', 'settings'].includes(t)) ui.tab = t; const v = sessionStorage.getItem('temps-vd'); if (/^\d{4}-\d\d-\d\d$/.test(v || '')) ui.viewDay = v; } catch { /* ignoré */ }
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const SHORT = { unk: 'Temps perdu', etu: 'Études', trav: 'Travail', obl: 'Obligation', vie: 'Quotidien', pause: 'Pause', loisir: 'Loisir' };
+const SHORT = { unk: 'Temps perdu', etu: 'Études', prep: 'Préparation', trav: 'Travail', obl: 'Obligation', vie: 'Quotidien', pause: 'Pause', loisir: 'Loisir' };
 /** Choix du sélecteur ('etu' | 'trav' | autre) → catégorie interne + type de travail productif. */
 const splitCat = v => (v === 'etu' || v === 'trav') ? { cat: 'prod', sub: v } : { cat: v };
 const goalBlock = b => b.cat === 'prod' || (b.cat === 'obl' && !!b.goalId);   // session d'objectif (études, travail ou obligation)
@@ -188,7 +188,7 @@ function renderBilan() {
   let html = dayNav();
   if (!hasData(st, key) && key !== dayKey()) return html + '<section class="card"><p class="muted">Pas de données pour ce jour.</p></section>';
   html += `<section class="card"><h2>Journée du ${dayLabel(key)}</h2>${rateBlock(a)}<p>Temps éveillé : <b>${fmtDur(a.awake)}</b></p>
-    ${['etu', 'trav', 'obl', 'vie', 'pause', 'loisir', 'unk'].map(c => { const v = c === 'etu' ? a.sub.etu : c === 'trav' ? a.sub.trav : a.cat[c]; return `
+    ${['etu', 'prep', 'trav', 'obl', 'vie', 'pause', 'loisir', 'unk'].map(c => { const v = c === 'etu' ? a.sub.etu : c === 'trav' ? a.sub.trav : a.cat[c]; return `
       <div class="line c-${c}"><div class="lh"><span>${catChip(c)}</span><b>${fmtDur(v)} — ${fmtPct(v, a.awake)}</b></div>
       <div class="bar"><i style="width:${a.awake ? v / a.awake * 100 : 0}%"></i></div></div>`; }).join('')}
     ${a.unplanned ? `<div class="line c-imp"><div class="lh"><span>⚡ dont imprévus</span><b>${fmtDur(a.unplanned)} — ${fmtPct(a.unplanned, a.awake)}</b></div><div class="bar"><i style="width:${a.awake ? a.unplanned / a.awake * 100 : 0}%"></i></div></div>` : ''}
@@ -255,7 +255,7 @@ function renderWeek() {
 
   html += `<section class="card"><h2>Détail par jour</h2>${rows.map(({ k, a }) => a ? `<div class="wd"><div class="wdh"><b>${dayShort(k)}</b>
       <span>🎯 ${fmtDur(a.focus)}${a.target ? ` <small>(${Math.round(a.goalDone / a.target * 100)} %)</small>` : ''}</span></div>
-      <div class="wdc"><span>📚 ${fmtDur(a.sub.etu)}</span><span>💼 ${fmtDur(a.sub.trav)}</span><span>Dispo ${fmtDur(a.availSoFar)}</span><span>❓ ${fmtDur(a.cat.unk)}</span><span>🔴 ${fmtDur(a.cat.obl)}</span><span>🌿 ${fmtDur(a.cat.pause)}</span><span>🎮 ${fmtDur(a.cat.loisir)}</span>${a.unplanned ? `<span>⚡ ${fmtDur(a.unplanned)}</span>` : ''}</div></div>`
+      <div class="wdc"><span>📚 ${fmtDur(a.sub.etu)}</span><span>🗂️ ${fmtDur(a.cat.prep)}</span><span>💼 ${fmtDur(a.sub.trav)}</span><span>Dispo ${fmtDur(a.availSoFar)}</span><span>❓ ${fmtDur(a.cat.unk)}</span><span>🔴 ${fmtDur(a.cat.obl)}</span><span>🌿 ${fmtDur(a.cat.pause)}</span><span>🎮 ${fmtDur(a.cat.loisir)}</span>${a.unplanned ? `<span>⚡ ${fmtDur(a.unplanned)}</span>` : ''}</div></div>`
       : `<div class="wd muted"><div class="wdh"><b>${dayShort(k)}</b><span>—</span></div></div>`).join('')}</section>`;
 
   // tendances

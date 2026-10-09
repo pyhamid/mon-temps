@@ -2,6 +2,7 @@
 const norm = s => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
 const RULES = [
+  ['prep', /organis|planifi|prepar\w* (mes |les |le |la |l'|ma |mon )?(cours|etude|revis|planning|semaine|examen|programme|fiche)|trier|classer|fiches?\b/],
   ['lost', /reseau|insta|tiktok|snap|facebook|scroll/],            // réseaux sociaux = temps perdu (même chose que « je ne sais plus »)
   ['vie', /manger|mange|repas|cuisin|dejeuner|diner|petit.?dej|douche|menage|courses|lessive|vaisselle|habill|prepar(e|ais) (mes|ma|le|la)|rang(e|ais)|toilette/],
   ['trav', /boulot|\bjob\b|travail|alternance|stage|mission|client|bureau|shift/],
