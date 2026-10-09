@@ -85,7 +85,8 @@ export function analyse(state, key, nowMs = Date.now()) {
   const s0 = dayStartMs(key), day = state.days[key] || EMPTY;
   const { wake, bed } = dayWindow(state, key);
   // Aujourd'hui, tant que le réveil n'est pas confirmé, on ne compte aucun temps inconnu.
-  const unconfirmed = state.days[key]?.wakeActual == null && key === dayKey(new Date(nowMs));
+  // (pendant 30 min après l'heure prévue seulement : ensuite on suppose le réveil à l'heure prévue, et les trous sont signalés)
+  const unconfirmed = state.days[key]?.wakeActual == null && key === dayKey(new Date(nowMs)) && minuteOf(nowMs, key) < wake + 30;
   const upto = unconfirmed ? wake : Math.max(wake, Math.min(minuteOf(nowMs, key), bed));
   const fixed = new Array(1440).fill(null), arr = new Array(1440).fill(null), lost = new Array(1440).fill(false);
   const fixedLost = new Array(1440).fill(false), impArr = new Array(1440).fill(false), subArr = new Array(1440).fill('etu');

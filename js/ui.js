@@ -6,6 +6,7 @@ import {
   dayKey, dayStartMs, addDays, dayLabel, dayShort, minuteOf, fmtHM, fmtDur, fmtPct, fmtClock, toInput, fromInput, uid, ceil5,
 } from './time.js';
 import { CATS, PICKABLE, analyse, insights, patterns, hasData, sessionElapsed, studyRate, blockDone, dayWindow, entriesOf } from './analysis.js';
+import { checkIns } from './remind.js';
 import { propose, applyProposal } from './planner.js';
 import { signals } from './signals.js';
 import { classify } from './classify.js';
@@ -89,8 +90,10 @@ function renderHome() {
   const used = Object.keys(st.days).filter(k => st.days[k].log.length).length;
   if (used >= 3 && Date.now() - st.settings.lastBackup > 14 * 86400000)
     sigs.push({ icon: '💾', text: 'Sauvegarde conseillée : tes données ne sont que sur cet appareil (Réglages, puis Exporter).', action: 'tab-settings' });
-  const shown = sigs.slice(0, 3), more = sigs.length - shown.length;
-  html += `<section class="card"><h2>Alertes</h2>${shown.length ? shown.map(alertRow).join('') + (more > 0 ? `<p class="muted small">+ ${more} autre(s) alerte(s) à traiter d'abord.</p>` : '') : '<p class="muted">Rien à signaler 👍</p>'}</section>`;
+  sigs.sort((x, y) => (y.type === 'unknown') - (x.type === 'unknown'));            // le temps non identifié d'abord
+  const shown = sigs.slice(0, 4), more = sigs.length - shown.length;
+  html += `<section class="card"><h2>Alertes</h2>${shown.length ? shown.map(alertRow).join('') + (more > 0 ? `<p class="muted small">+ ${more} autre(s) alerte(s) à traiter d'abord.</p>` : '') : '<p class="muted">Rien à signaler 👍</p>'}
+    <p class="muted small">${day.wakeActual == null && nm < a.wake + 30 ? '❓ Confirme ton réveil ci-dessus : sans ça je ne cherche pas encore le temps non identifié.' : a.gaps.length ? '' : `❓ Temps non identifié : aucun trou de plus de ${st.settings.minGap} min en ce moment (tout est couvert par tes activités et tes créneaux fixes).`}</p></section>`;
 
   html += `<div class="row"><button class="btn" data-act="unplanned">⚡ Imprévu</button><button class="btn" data-act="entry-open">＋ Activité passée</button></div>`;
   return html;
@@ -296,9 +299,10 @@ function renderSettingsRaw() {
     <section class="card"><h2>Notifications</h2>
     ${perm === 'granted' ? '<p class="muted">Autorisées ✓</p>' : perm === 'unsupported' ? '<p class="muted">Non disponibles sur cet appareil/navigateur.</p>'
       : '<button class="btn primary" data-act="notif-perm">Autoriser les notifications</button>'}
+    ${perm === 'granted' ? '<div class="row"><button class="btn" data-act="notif-test">🔔 Tester une notification</button></div>' : ''}
     ${chk('reminder', 'Rappel de début d\'activité')}${chk('late', 'Retard')}${chk('unknown', 'Temps non identifié')}
     ${chk('end', 'Fin de session')}${chk('pause', 'Pause plus longue que prévu')}${chk('reorg', 'Réorganisation')}
-    <p class="muted small">Sans serveur, les notifications partent tant que l'app est ouverte ou en arrière-plan. Aucune surveillance des autres applications.</p></section>
+    <p class="muted small">Ces notifications-ci ne partent que tant que l'app est ouverte ou récemment ouverte (limite d'une app web sans serveur). Pour être prévenu app fermée, utilise les rappels via Google Agenda (section Google Agenda).</p></section>
     <section class="card"><h2>📅 Abonnement au calendrier</h2>
     <p class="muted">Colle le lien d'abonnement de l'université (.ics ou webcal://). L'app le relit toute seule toutes les 30 minutes quand elle est ouverte : cours déplacés, ajoutés ou supprimés sont mis à jour.</p>
     <label>Lien d'abonnement<input type="text" data-setting="icsUrl" value="${esc(s.icsUrl)}" placeholder="https://… ou webcal://…" autocomplete="off" spellcheck="false"></label>
@@ -319,7 +323,10 @@ function renderSettingsRaw() {
     <button class="btn" data-act="gcal-push-week" ${s.gcalClientId ? '' : 'disabled'}>Envoyer les 7 derniers jours</button>
     <button class="btn" data-act="gcal-cleanup" ${s.gcalClientId ? '' : 'disabled'}>Nettoyer les doublons dans Google</button></div>
     <p class="muted small">Ce que tu as fait (études, travail, pauses…) est envoyé dans le calendrier « Mon temps », avec la couleur de sa catégorie. Tu peux y changer la <b>couleur</b> (= le type), l'<b>heure</b>, le <b>titre</b>, ou <b>supprimer</b> un événement, y compris ceux de hier. Puis clique sur « Importer maintenant » : l'app met à jour tes statistiques (30 derniers jours). Un trou noir recolorié devient une activité identifiée.</p>
-    <label class="check"><input type="checkbox" data-setting="gcalAuto" ${s.gcalAuto ? 'checked' : ''}> Synchroniser automatiquement (à l'ouverture et toutes les 30 min)</label>
+    <label class="check"><input type="checkbox" data-setting="gcalAuto" ${s.gcalAuto ? 'checked' : ''}> Synchroniser automatiquement (importer + envoyer : à l'ouverture, toutes les 15 min, et 30 s après chaque modification)</label>
+    <label class="check"><input type="checkbox" data-setting="gcalRemind" ${s.gcalRemind ? 'checked' : ''}> Me rappeler via Google Agenda (notifications sur le téléphone, même app fermée)</label>
+    <label>Point rapide « que fais-tu ? » <select data-setting="checkEvery">${[[0, 'jamais'], [60, 'toutes les heures'], [120, 'toutes les 2 h'], [180, 'toutes les 3 h']].map(([v, l]) => `<option value="${v}" ${s.checkEvery === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+    <p class="muted small">Les rappels sont des événements du calendrier « Mon temps » avec une notification : l'app Google Agenda de ton téléphone les affiche même quand Mon temps est fermée. Vérifie que ce calendrier est coché et que les notifications de Google Agenda sont autorisées.</p>
     ${Object.keys(s.overrides || {}).length ? `<div class="row"><span class="muted small">${Object.keys(s.overrides).length} correction(s) locale(s) / événement(s) masqué(s)</span><button class="btn small" data-act="overrides-reset">↩ Tout rétablir</button></div>` : ''}
     ${s.gcalSync ? `<p class="muted small">Dernière synchro Google : ${new Date(s.gcalSync).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · ${esc(s.gcalMsg)}</p>` : ''}
     <p class="muted small">Sans identifiant, tu peux importer un fichier .ics :</p>
@@ -636,7 +643,33 @@ async function gcalImport({ interactive = false, notify = false } = {}) {
     else if (get().settings.gcalLinked) { ui.gcalTap = true; if (!ui.modal) render(); }   // il faudra un appui pour renouveler l'accès
   } finally { gcalBusy = false; }
 }
-const gcalDue = () => { const st = get().settings; return st.gcalAuto && st.gcalLinked && st.gcalClientId && !ui.gcalTap && Date.now() - st.gcalSync > 30 * 60000; };
+/** Synchronisation complète et automatique : lit Google (cours, modifications), puis envoie ce que tu as fait (7 derniers jours + rappels du jour). */
+async function gcalAutoSync({ interactive = false } = {}) {
+  const clientId = get().settings.gcalClientId;
+  if (!clientId || gcalBusy) return;
+  gcalBusy = true;
+  try {
+    if (!gg.isConnected()) await gg.connect(clientId, { silent: !interactive });
+    await gcalReadAll();
+    const prov = new gg.GoogleCalendarProvider(get().settings.gcalId), today = dayKey();
+    for (let i = 6; i >= 0; i--) { const dk = addDays(today, -i); if (i === 0 || userDay(get().days[dk])) await gcalPushDay(dk, prov); }
+    await gcalWriteBack(prov);
+    update(s => { s.settings.gcalSync = Date.now(); s.settings.gcalMsg = 'importé et envoyé'; });
+    ui.gcalTap = false;
+  } catch (e) {
+    if (interactive) alert(e.message);
+    else if (get().settings.gcalLinked) { ui.gcalTap = true; if (!ui.modal) render(); }   // il faudra un appui pour renouveler l'accès
+  } finally { gcalBusy = false; }
+}
+let syncTimer = null;
+/** Quelques secondes après chaque modification (ajout, correction, fin de chrono…), envoie tout vers Google. */
+const gcalSoon = () => {
+  const s = get().settings;
+  if (gcalBusy || !s.gcalAuto || !s.gcalLinked || !s.gcalClientId || ui.gcalTap) return;
+  if (syncTimer) return;                                  // une synchro est déjà prévue
+  syncTimer = setTimeout(() => { syncTimer = null; gcalAutoSync(); }, 30000);
+};
+const gcalDue = () => { const st = get().settings; return st.gcalAuto && st.gcalLinked && st.gcalClientId && !ui.gcalTap && Date.now() - st.gcalSync > 15 * 60000; };
 
 const userDay = d => !!d && (d.log.length > 0 || d.wakeActual != null || d.goals.length > 0);
 
@@ -644,12 +677,15 @@ const userDay = d => !!d && (d.log.length > 0 || d.wakeActual != null || d.goals
 async function gcalPushDay(k, prov) {
   const st = get(), col = st.settings.colors, s0 = dayStartMs(k), day = st.days[k] || { plan: [], log: [] };
   const used = userDay(day);                                     // un jour où tu n'as rien fait (même avec des cours importés) n'a pas de « temps perdu »
-  const a = analyse(st, k, Date.now());
+  const a = analyse(st, k, Date.now()), today = dayKey(), nowMin = minuteOf(Date.now(), today), remind = st.settings.gcalRemind;
   const mn = ms => Math.max(0, Math.min(1440, Math.round((ms - s0) / 60000)));
   const items = [
     // sessions prévues pas encore faites + créneaux fixes saisis dans l'app (rendez-vous, repas…) ; jamais les événements venant de Google
     ...day.plan.filter(b => !IMPORTED.includes(b.source) && b.cat !== 'unk' && (b.fixed || (goalBlock(b) && blockDone(st, k, b, Date.now()) < (b.end - b.start) / 2)))
-      .map(b => ({ id: b.id, start: b.start, end: b.end, summary: `${b.unplanned ? '⚡' : emojiOf(b)} ${b.title}`, colorId: col[b.unplanned ? 'imp' : subOf(b)] })),
+      .map(b => ({ id: b.id, start: b.start, end: b.end, summary: `${b.unplanned ? '⚡' : emojiOf(b)} ${b.title}`, colorId: col[b.unplanned ? 'imp' : subOf(b)],
+        ...(remind && k === today && b.start > nowMin ? { remindMin: goalBlock(b) ? 0 : 10 } : {}) })),
+    ...(remind && k === today ? checkIns({ nowM: nowMin, wake: a.wake, bed: a.bed, every: st.settings.checkEvery, busy: day.plan.filter(b => b.fixed && (b.cat === 'obl' || (b.cat === 'prod' && b.sub === 'trav'))) })
+      .map(m => ({ id: `chk:${m}`, start: m, end: m + 5, summary: '🔔 Point rapide : ouvre Mon temps (que fais-tu ?)', remindMin: 0 })) : []),
     ...day.log.filter(e => e.cat !== 'unk' && !e.id.startsWith('g:') && mn(e.end) > mn(e.start))
       .map(e => ({ id: `log:${e.id}`, start: mn(e.start), end: mn(e.end), summary: `${e.unplanned ? '⚡' : emojiOf(e)} ${e.title}`, colorId: col[e.unplanned ? 'imp' : subOf(e)] })),
     ...(used ? a.lostSegs.map(g => ({ id: g.id, start: g.start, end: g.end, summary: `⬛ ${g.title}`, colorId: col.lost })) : []),
@@ -817,7 +853,7 @@ document.addEventListener('click', e => {
     case 'ics-sync': syncSub(true); break;
     case 'gcal-connect': gcalRun(async () => { await gg.connect(st.settings.gcalClientId); update(s => { s.settings.gcalLinked = true; }); }); break;
     case 'gcal-import': gcalImport({ interactive: true, notify: true }); break;
-    case 'gcal-sync': gcalImport({ interactive: true }); break;
+    case 'gcal-sync': gcalAutoSync({ interactive: true }); break;
     case 'color-set': update(s => { s.settings.colors[t.dataset.key] = t.dataset.id; }); break;
     case 'gcal-push': gcalRun(async () => {
       if (!gg.isConnected()) await gg.connect(st.settings.gcalClientId);
@@ -844,6 +880,7 @@ document.addEventListener('click', e => {
       alert(`7 derniers jours envoyés : ${tot.created} créé(s), ${tot.updated} mis à jour, ${tot.deleted} supprimé(s)${tot.written ? `, ${tot.written} événement(s) d'origine modifié(s)` : ''}${tot.readOnly ? `, ${tot.readOnly} en lecture seule` : ''}.`);
     }); break;
     case 'notif-perm': notify.askPermission().then(render); break;
+    case 'notif-test': notify.test(); break;
     case 'export': {
       const a = document.createElement('a');
       a.href = URL.createObjectURL(new Blob([exportJSON()], { type: 'application/json' }));
@@ -885,16 +922,16 @@ tabsEl.addEventListener('click', e => {
 modalEl.addEventListener('click', e => { if (e.target === modalEl) closeModal(); });
 
 // -------------------------------------------------------------- Démarrage
-subscribe(() => { if (!ui.modal) render(); });
+subscribe(() => { gcalSoon(); if (!ui.modal) render(); });
 const typing = () => /INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName || '');
 setInterval(tick, 1000);
 const subDue = () => { const st = get().settings; return st.icsUrl && Date.now() - st.icsSync > 30 * 60000; };
-setInterval(() => { ensureRecurring(dayKey()); if (subDue()) syncSub(false); if (gcalDue()) gcalImport(); notify.check(); if (!ui.modal && !typing() && !document.hidden) render(); }, 30000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { if (gcalDue()) gcalImport(); notify.check(); if (!ui.modal) render(); } });
+setInterval(() => { ensureRecurring(dayKey()); if (subDue()) syncSub(false); if (gcalDue()) gcalAutoSync(); notify.check(); if (!ui.modal && !typing() && !document.hidden) render(); }, 30000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { if (gcalDue()) gcalAutoSync(); notify.check(); if (!ui.modal) render(); } });
 ensureRecurring(dayKey());
 if (get().settings.gcalClientId) gg.preload();
 if (subDue()) syncSub(false);
-if (gcalDue() || (get().settings.gcalAuto && get().settings.gcalLinked && !get().settings.gcalSync)) gcalImport();
+if (gcalDue() || (get().settings.gcalAuto && get().settings.gcalLinked && !get().settings.gcalSync)) gcalAutoSync();
 render();
 notify.check();
 

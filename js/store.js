@@ -23,7 +23,9 @@ export const DEFAULT_SETTINGS = {
   overrides: {},           // corrections faites dans l'app sur des événements venant de Google : { 'gcal:ID': {cat, sub?, title} }
   recurring: [],           // objectifs répétés du lundi au vendredi : {id,title,target,hard}
   lastBackup: 0,           // dernière sauvegarde exportée (ms)
-  gcalAuto: true,          // synchroniser Google automatiquement
+  gcalAuto: true,          // synchroniser Google automatiquement (import + envoi)
+  gcalRemind: true,        // rappels (notifications) via Google Agenda : début de session, points rapides
+  checkEvery: 120,         // un « point rapide » toutes les X minutes (0 = aucun)
   gcalLinked: false,       // le compte a déjà été autorisé sur cet appareil
   gcalSync: 0,
   gcalMsg: '',              // id du calendrier "Mon temps" créé par l'app

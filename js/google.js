@@ -140,11 +140,13 @@ export class GoogleCalendarProvider extends CalendarProvider {
     const calId = await this.ensureCalendar(), cal = encodeURIComponent(calId), s0 = dayStartMs(key);
     const n = { created: 0, updated: 0, deleted: 0 }, out = {}, keepSet = new Set(keep);
     const mtOf = e => e.extendedProperties?.private?.mt || '';
+    const remOf = e => e.reminders?.overrides?.[0]?.minutes ?? null;
     const sig = (summary, a, b) => `${summary}|${a}|${b}`;
     const ms = (it, f) => s0 + it[f] * 60000;
     const body = (it, mt) => JSON.stringify({
       summary: it.summary,
       ...(it.colorId ? { colorId: it.colorId } : {}),
+      reminders: { useDefault: false, overrides: it.remindMin != null ? [{ method: 'popup', minutes: it.remindMin }] : [] },
       extendedProperties: { private: { mt } },
       start: { dateTime: new Date(ms(it, 'start')).toISOString(), timeZone: tz() },
       end: { dateTime: new Date(ms(it, 'end')).toISOString(), timeZone: tz() },
@@ -169,7 +171,7 @@ export class GoogleCalendarProvider extends CalendarProvider {
         continue;
       }
       const [first, ...dups] = list;
-      const stale = first.summary !== it.summary || (first.colorId || '') !== (it.colorId || '') || mtOf(first) !== mt
+      const stale = first.summary !== it.summary || remOf(first) !== (it.remindMin ?? null) || (first.colorId || '') !== (it.colorId || '') || mtOf(first) !== mt
         || Date.parse(first.start.dateTime) !== ms(it, 'start') || Date.parse(first.end.dateTime) !== ms(it, 'end');
       if (stale) { await api(`/calendars/${cal}/events/${first.id}`, { method: 'PUT', body: body(it, mt) }); n.updated++; }
       out[it.id] = first.id;

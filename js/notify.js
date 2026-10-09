@@ -17,6 +17,9 @@ async function show(sig) {
   else new Notification('Mon temps', opts);
 }
 
+/** Bouton de test : montre tout de suite une notification pour vérifier que l'appareil les affiche. */
+export function test() { if (supported() && Notification.permission === 'granted') show({ id: `test:${Date.now()}`, text: 'Test : les notifications fonctionnent sur cet appareil.' }); }
+
 /** À appeler régulièrement. Une notification n'est envoyée qu'une fois, et seulement si l'app n'est pas au premier plan. */
 export function check(now = Date.now()) {
   if (!supported() || Notification.permission !== 'granted') return;
