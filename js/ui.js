@@ -608,7 +608,9 @@ async function syncSub(manual) {
 }
 
 /** Lit Google Agenda (8 jours) et remplace les blocs importés. interactive = fenêtre Google autorisée (après un clic). */
-let gcalBusy = false;
+let gcalBusy = false, resync = false, inSys = false;
+/** Modification faite par la synchro elle-même (ne doit pas redéclencher une synchro). */
+const sysUpdate = fn => { inSys = true; try { update(fn); } finally { inSys = false; } };
 const BACK_DAYS = 30;                 // jours passés relus à chaque import
 /** Lit tes calendriers + « Mon temps » et met l'app à jour (sans message). Suppose qu'on est connecté. */
 async function gcalReadAll() {
@@ -617,7 +619,7 @@ async function gcalReadAll() {
   const events = await prov.getEvents(from, to, classifier(colors));
   const mirror = await prov.getMirrorEvents(from, to);
   let changes = { updated: 0, created: 0, removed: 0 };
-  update(s => {
+  sysUpdate(s => {
     clearImported(ensureDay, s, 'gcal', fromKey, BACK_DAYS + 9);
     importEvents(events, ensureDay, s, 'gcal');
     changes = applyMirror(s, mirror, classifier(colors), { fromMs: from, toMs: to });
@@ -654,18 +656,19 @@ async function gcalAutoSync({ interactive = false } = {}) {
     const prov = new gg.GoogleCalendarProvider(get().settings.gcalId), today = dayKey();
     for (let i = 6; i >= 0; i--) { const dk = addDays(today, -i); if (i === 0 || userDay(get().days[dk])) await gcalPushDay(dk, prov); }
     await gcalWriteBack(prov);
-    update(s => { s.settings.gcalSync = Date.now(); s.settings.gcalMsg = 'importé et envoyé'; });
+    sysUpdate(s => { s.settings.gcalSync = Date.now(); s.settings.gcalMsg = 'importé et envoyé'; });
     ui.gcalTap = false;
   } catch (e) {
     if (interactive) alert(e.message);
     else if (get().settings.gcalLinked) { ui.gcalTap = true; if (!ui.modal) render(); }   // il faudra un appui pour renouveler l'accès
-  } finally { gcalBusy = false; }
+  } finally { gcalBusy = false; if (resync) { resync = false; gcalSoon(); } }
 }
 let syncTimer = null;
 /** Quelques secondes après chaque modification (ajout, correction, fin de chrono…), envoie tout vers Google. */
 const gcalSoon = () => {
   const s = get().settings;
-  if (gcalBusy || !s.gcalAuto || !s.gcalLinked || !s.gcalClientId || ui.gcalTap) return;
+  if (!s.gcalAuto || !s.gcalLinked || !s.gcalClientId || ui.gcalTap) return;
+  if (gcalBusy) { resync = true; return; }                // modifié pendant une synchro : on repartira juste après
   if (syncTimer) return;                                  // une synchro est déjà prévue
   syncTimer = setTimeout(() => { syncTimer = null; gcalAutoSync(); }, 30000);
 };
@@ -702,7 +705,7 @@ async function gcalPushDay(k, prov) {
   ];
   const keep = day.log.filter(e => e.id.startsWith('g:')).map(e => e.id.slice(2));
   const r = await prov.pushDay(k, items, day.gcal || {}, keep);
-  update(s => { ensureDay(s, k).gcal = r.map; s.settings.gcalId = r.calId; });
+  sysUpdate(s => { ensureDay(s, k).gcal = r.map; s.settings.gcalId = r.calId; });
   return r;
 }
 
@@ -715,19 +718,19 @@ async function gcalWriteBack(prov) {
       try {
         await prov.patchEvent(b.gref.c, b.gref.e, { summary: b.title, colorId: col[b.unplanned ? 'imp' : subOf(b)], start: b.start, end: b.end }, dayStartMs(k));
         out.written++;
-        update(s => { const bb = s.days[k]?.plan.find(y => y.id === b.id); if (bb) delete bb.dirty; if (s.settings.overrides) delete s.settings.overrides[okey]; });   // Google est à jour : plus besoin de la correction locale
+        sysUpdate(s => { const bb = s.days[k]?.plan.find(y => y.id === b.id); if (bb) delete bb.dirty; if (s.settings.overrides) delete s.settings.overrides[okey]; });   // Google est à jour : plus besoin de la correction locale
       } catch (e) {
         if (/insufficient|scope/i.test(e.message)) throw new Error('Permission manquante : clique sur « Se connecter à Google » et accepte la nouvelle autorisation (modifier tes événements).');
         if (e.status !== 403 && e.status !== 404) throw e;
         out.readOnly++;                                                  // calendrier en lecture seule (ex. abonnement de l'université)
-        update(s => { const bb = s.days[k]?.plan.find(y => y.id === b.id); if (bb) { delete bb.dirty; bb.ro = true; } const o = s.settings.overrides?.[okey]; if (o) delete o.dirty; });
+        sysUpdate(s => { const bb = s.days[k]?.plan.find(y => y.id === b.id); if (bb) { delete bb.dirty; bb.ro = true; } const o = s.settings.overrides?.[okey]; if (o) delete o.dirty; });
       }
     }
   }
   for (const evId of [...(get().settings.tombstones || [])]) {   // activités venues de Google supprimées dans l'app
     const calId = get().settings.gcalId;
     if (calId) await prov.deleteEvent(calId, evId);
-    update(s => { s.settings.tombstones = (s.settings.tombstones || []).filter(x => x !== evId); });
+    sysUpdate(s => { s.settings.tombstones = (s.settings.tombstones || []).filter(x => x !== evId); });
     out.written++;
   }
   for (const [k, day] of Object.entries(get().days)) {           // activités créées dans Google (calendrier « Mon temps ») puis corrigées dans l'app
@@ -736,11 +739,11 @@ async function gcalWriteBack(prov) {
         const calId = get().settings.gcalId || await prov.ensureCalendar(), s0 = dayStartMs(k);
         await prov.patchEvent(calId, e.id.slice(2), { summary: `${e.unplanned ? '⚡' : emojiOf(e)} ${e.title}`, colorId: col[e.unplanned ? 'imp' : subOf(e)], start: Math.round((e.start - s0) / 60000), end: Math.round((e.end - s0) / 60000) }, s0);
         out.written++;
-        update(s => { const x = s.days[k]?.log.find(y => y.id === e.id); if (x) delete x.dirty; });
+        sysUpdate(s => { const x = s.days[k]?.log.find(y => y.id === e.id); if (x) delete x.dirty; });
       } catch (err) {
         if (/insufficient|scope/i.test(err.message)) throw new Error('Permission manquante : clique sur « Se connecter à Google » et accepte la nouvelle autorisation (modifier tes événements).');
         if (err.status !== 404 && err.status !== 410) throw err;
-        update(s => { const x = s.days[k]?.log.find(y => y.id === e.id); if (x) delete x.dirty; });   // l'événement n'existe plus dans Google
+        sysUpdate(s => { const x = s.days[k]?.log.find(y => y.id === e.id); if (x) delete x.dirty; });   // l'événement n'existe plus dans Google
       }
     }
   }
@@ -932,7 +935,7 @@ tabsEl.addEventListener('click', e => {
 modalEl.addEventListener('click', e => { if (e.target === modalEl) closeModal(); });
 
 // -------------------------------------------------------------- Démarrage
-subscribe(() => { gcalSoon(); if (!ui.modal) render(); });
+subscribe(() => { if (!inSys) gcalSoon(); if (!ui.modal) render(); });
 const typing = () => /INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName || '');
 setInterval(tick, 1000);
 const subDue = () => { const st = get().settings; return st.icsUrl && Date.now() - st.icsSync > 30 * 60000; };
