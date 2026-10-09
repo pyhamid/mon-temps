@@ -3,14 +3,16 @@
 //  - calendar.readonly       : lire la liste de tes calendriers et tes événements (cours, rendez-vous…)
 //  - calendar.app.created    : créer et gérer le calendrier "Mon temps" créé par l'app
 //  - calendar.events         : modifier un événement existant (couleur, titre, heure) quand tu le changes dans l'app
-// Le jeton reste en mémoire (1 h) ; rien n'est envoyé ailleurs qu'à Google.
+// Le jeton (valable 1 h) est gardé sur cet appareil pour survivre à la fermeture de l'app ; rien n'est envoyé ailleurs qu'à Google.
 import { CalendarProvider } from './calendar.js';
 import { dayStartMs } from './time.js';
 
 const SCOPES = 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.app.created https://www.googleapis.com/auth/calendar.events';
 const API = 'https://www.googleapis.com/calendar/v3';
 const CAL_NAME = 'Mon temps';
+const TOK = 'temps-gtok';
 let token = null, expires = 0;
+try { const t = JSON.parse(localStorage.getItem(TOK)); if (t && t.expires > Date.now()) ({ token, expires } = t); } catch { /* aucun jeton gardé */ }
 
 export const isConnected = () => !!token && Date.now() < expires;
 const tz = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -31,7 +33,9 @@ export function connect(clientId, { silent = false } = {}) {
       client_id: clientId, scope: SCOPES,
       callback: r => {
         if (r.error) return reject(new Error(r.error_description || r.error));
-        token = r.access_token; expires = Date.now() + (r.expires_in - 60) * 1000; resolve();
+        token = r.access_token; expires = Date.now() + (r.expires_in - 60) * 1000;
+        try { localStorage.setItem(TOK, JSON.stringify({ token, expires })); } catch { /* stockage indisponible */ }
+        resolve();
       },
       error_callback: e => reject(new Error(e.type === 'popup_closed' ? 'Connexion annulée.' : (e.message || e.type))),
     });

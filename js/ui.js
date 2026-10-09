@@ -318,7 +318,7 @@ function renderSettingsRaw() {
     <section class="card"><h2>Google Agenda</h2>
     <p class="muted">Lecture de tes événements (cours, rendez-vous…) comme créneaux fixes ; envoi des sessions de productivité dans un calendrier séparé « Mon temps », seulement quand tu le demandes.</p>
     <label>Identifiant client Google <span class="small">(voir LISEZMOI)</span><input type="text" data-setting="gcalClientId" value="${esc(s.gcalClientId)}" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false"></label>
-    <div class="row"><button class="btn primary" data-act="gcal-connect" ${s.gcalClientId ? '' : 'disabled'}>${gg.isConnected() ? 'Connecté ✓' : 'Se connecter à Google'}</button>
+    <div class="row"><button class="btn primary" data-act="gcal-connect" ${s.gcalClientId ? '' : 'disabled'}>${gg.isConnected() ? 'Connecté ✓' : s.gcalLinked && !ui.gcalTap ? 'Compte lié ✓ (reconnexion automatique…)' : s.gcalLinked ? 'Se reconnecter à Google' : 'Se connecter à Google'}</button>
     <button class="btn" data-act="gcal-import" ${s.gcalClientId ? '' : 'disabled'}>Importer maintenant</button>
     <button class="btn" data-act="gcal-push-week" ${s.gcalClientId ? '' : 'disabled'}>Envoyer les 7 derniers jours</button>
     <button class="btn" data-act="gcal-cleanup" ${s.gcalClientId ? '' : 'disabled'}>Nettoyer les doublons dans Google</button></div>
@@ -669,6 +669,16 @@ const gcalSoon = () => {
   if (syncTimer) return;                                  // une synchro est déjà prévue
   syncTimer = setTimeout(() => { syncTimer = null; gcalAutoSync(); }, 30000);
 };
+/** Au démarrage / retour dans l'app : si le compte est déjà autorisé, renouvelle l'accès sans rien demander (puis synchronise si c'est dû). */
+async function gcalStart() {
+  const s = get().settings;
+  if (!s.gcalLinked || !s.gcalClientId || gcalBusy) return;
+  if (!gg.isConnected()) {
+    try { await gg.connect(s.gcalClientId, { silent: true }); ui.gcalTap = false; }
+    catch { ui.gcalTap = true; if (!ui.modal) render(); return; }
+  }
+  if (gcalDue() || !get().settings.gcalSync) gcalAutoSync(); else if (!ui.modal) render();
+}
 const gcalDue = () => { const st = get().settings; return st.gcalAuto && st.gcalLinked && st.gcalClientId && !ui.gcalTap && Date.now() - st.gcalSync > 15 * 60000; };
 
 const userDay = d => !!d && (d.log.length > 0 || d.wakeActual != null || d.goals.length > 0);
@@ -927,11 +937,11 @@ const typing = () => /INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagNam
 setInterval(tick, 1000);
 const subDue = () => { const st = get().settings; return st.icsUrl && Date.now() - st.icsSync > 30 * 60000; };
 setInterval(() => { ensureRecurring(dayKey()); if (subDue()) syncSub(false); if (gcalDue()) gcalAutoSync(); notify.check(); if (!ui.modal && !typing() && !document.hidden) render(); }, 30000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { if (gcalDue()) gcalAutoSync(); notify.check(); if (!ui.modal) render(); } });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { gcalStart(); notify.check(); if (!ui.modal) render(); } });
 ensureRecurring(dayKey());
 if (get().settings.gcalClientId) gg.preload();
+setTimeout(gcalStart, 1500);                      // laisse le temps au service Google de se charger
 if (subDue()) syncSub(false);
-if (gcalDue() || (get().settings.gcalAuto && get().settings.gcalLinked && !get().settings.gcalSync)) gcalAutoSync();
 render();
 notify.check();
 
