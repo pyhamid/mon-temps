@@ -27,6 +27,9 @@ export function dayWindow(state, key) {
     for (const b of d.plan || []) if (b.fixed && (b.cat === 'obl' || (b.cat === 'prod' && b.sub === 'trav')) && b.start < wake) wake = b.start;
   let bed = d.sleepPlanned ?? s.bed;
   if (bed <= wake) bed = 1440;
+  // tu as continué après l'heure de coucher prévue : la journée dure jusqu'à ta dernière activité (sinon elle serait ignorée dans les calculs)
+  const s0 = dayStartMs(key);
+  for (const e of d.log || []) bed = Math.max(bed, Math.min(1440, Math.round((e.end - s0) / 60000)));
   return { wake, bed: Math.min(bed, 1440) };
 }
 
@@ -86,7 +89,8 @@ export function sessionElapsed(state, nowMs) {
  */
 export function analyse(state, key, nowMs = Date.now()) {
   const s0 = dayStartMs(key), day = state.days[key] || EMPTY;
-  const { wake, bed } = dayWindow(state, key);
+  let { wake, bed } = dayWindow(state, key);
+  if (state.current && key === dayKey(new Date(nowMs))) bed = Math.min(1440, Math.max(bed, minuteOf(nowMs, key)));   // chrono en cours après l'heure de coucher prévue
   // Aujourd'hui, tant que le réveil n'est pas confirmé, on ne compte aucun temps inconnu.
   // (pendant 30 min après l'heure prévue seulement : ensuite on suppose le réveil à l'heure prévue, et les trous sont signalés)
   const unconfirmed = state.days[key]?.wakeActual == null && key === dayKey(new Date(nowMs)) && minuteOf(nowMs, key) < wake + 30;
