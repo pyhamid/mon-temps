@@ -7,6 +7,7 @@ import {
 } from './time.js';
 import { CATS, PICKABLE, analyse, insights, patterns, hasData, sessionElapsed, studyRate, prepRate, blockDone, dayWindow, entriesOf } from './analysis.js';
 import { checkIns } from './remind.js';
+import { REPEAT_LABEL, ruleMatches, blockFor, blockId, newRule } from './recur.js';
 import { propose, applyProposal } from './planner.js';
 import { signals } from './signals.js';
 import { classify } from './classify.js';
@@ -172,7 +173,7 @@ function renderPlan() {
       const done = goalBlock(b) ? blockDone(st, key, b, now) : 0;
       return `<div class="block c-${subOf(b)}"><div class="t">${fmtHM(b.start)}<br>${fmtHM(b.end)}</div>
         <div class="grow"><b>${emojiOf(b)} ${esc(b.title)}</b>
-        <div class="muted">${b.fixed ? (IMPORTED.includes(b.source) ? 'calendrier' : 'créneau fixe') : 'proposé'}${b.dirty ? ' · ⏳ à envoyer' : ''}${b.ro ? ' · lecture seule' : ''}${done > 0 ? ` · fait ${fmtDur(done)}` : ''}</div></div>
+        <div class="muted">${b.fixed ? (IMPORTED.includes(b.source) ? 'calendrier' : b.recurId ? 'créneau fixe · 🔁 répété' : 'créneau fixe') : 'proposé'}${b.dirty ? ' · ⏳ à envoyer' : ''}${b.ro ? ' · lecture seule' : ''}${done > 0 ? ` · fait ${fmtDur(done)}` : ''}</div></div>
         <div class="row tight">${!past && goalBlock(b) && key === dayKey() ? `<button class="btn small" data-act="start-block" data-id="${b.id}">▶</button>` : ''}
         <button class="btn small" data-act="block-edit" data-id="${b.id}">✎</button></div></div>`;
     }).join('') : '<p class="muted">Planning vide.</p>'}
@@ -545,12 +546,25 @@ function modalBlock(id) {
     <label>Titre<input type="text" name="title" value="${esc(b?.title)}" placeholder="Ex. Cours d'automatique" required></label>
     <div class="grid3"><label>De<input type="time" name="from" value="${toInput(b?.start ?? 9 * 60)}" required></label><label>À<input type="time" name="to" value="${toInput(b?.end ?? 10 * 60)}" required></label></div>
     ${catRadios(b ? subOf(b) : 'obl')}
+    ${b?.recurId ? `<p class="muted small">🔁 Ce créneau se répète : ${esc(REPEAT_LABEL[(get().settings.recurBlocks || []).find(r => r.id === b.recurId)?.mode] || '')}.</p>`
+      : b ? '' : `<label>Répéter<select name="repeat"><option value="">Ne se répète pas</option>${Object.entries(REPEAT_LABEL).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></label>`}
     <div class="row"><button class="btn primary">Enregistrer</button>${b ? '<button type="button" class="btn danger" data-act="block-del">' + (b && IMPORTED.includes(b.source) ? 'Masquer' : 'Supprimer') + '</button>' : ''}${b && IMPORTED.includes(b.source) && (get().settings.overrides || {})[b.id.replace(/:\d{4}-\d\d-\d\d$/, '')] ? '<button type="button" class="btn" data-act="block-reset">↩ Rétablir la version Google</button>' : ''}</div></form>`, f => {
     const start = fromInput(f.from), end = fromInput(f.to);
     if (end <= start) return alert('L\'heure de fin doit être après le début.');
+    const bb = f.id ? get().days[ui.viewDay]?.plan.find(p => p.id === f.id) : null;
+    const all = !!bb?.recurId && confirm('Ce créneau se répète.\nOK = modifier cette occurrence et toutes les suivantes\nAnnuler = seulement celle-ci');
     update(st => {
       const d = ensureDay(st, ui.viewDay);
       if (f.id) {
+        if (all) {
+          const r = (st.settings.recurBlocks || []).find(q => q.id === bb.recurId), sp = splitCat(f.cat);
+          if (r) {
+            Object.assign(r, { title: f.title.trim(), start, end, cat: sp.cat }); if (sp.sub) r.sub = sp.sub; else delete r.sub;
+            for (const [k, dd] of Object.entries(st.days)) if (k >= ui.viewDay) for (const q of dd.plan) if (q.recurId === r.id) {
+              Object.assign(q, { title: r.title, start, end, cat: r.cat }); if (r.sub) q.sub = r.sub; else delete q.sub; q.editedAt = Date.now();
+            }
+          }
+        }
         const x = d.plan.find(p => p.id === f.id), moved = x.start !== start || x.end !== end;
         Object.assign(x, { title: f.title.trim(), start, end, ...splitCat(f.cat), sub: splitCat(f.cat).sub, fixed: true, source: IMPORTED.includes(x.source) ? x.source : 'user' });
         x.editedAt = Date.now();
@@ -560,10 +574,30 @@ function modalBlock(id) {
           if (toGoogle) x.dirty = true;
         }
       }
+      else if (f.repeat) {                                                  // nouveau créneau qui se répète : une règle + les blocs des prochains jours
+        const r = newRule(uid(), { title: f.title.trim(), start, end, ...splitCat(f.cat) }, f.repeat, ui.viewDay);
+        (st.settings.recurBlocks ||= []).push(r);
+        d.plan.push(blockFor(r, ui.viewDay));
+      }
       else d.plan.push({ id: uid(), title: f.title.trim(), start, end, ...splitCat(f.cat), fixed: true, source: 'user' });
       d.plan.sort((p, q) => p.start - q.start);
     });
+    if (f.repeat && !f.id) ensureRecurBlocks();
   });
+}
+
+const RECUR_AHEAD = 21;       // jours à venir remplis à l'avance
+/** Ajoute les blocs des créneaux répétés pour les prochains jours (sans toucher à ceux qui existent déjà). */
+function ensureRecurBlocks() {
+  const rules = get().settings.recurBlocks || [];
+  if (!rules.length) return;
+  const today = dayKey(), adds = [];
+  for (let i = 0; i <= RECUR_AHEAD; i++) {
+    const k = addDays(today, i);
+    for (const r of rules) if (ruleMatches(r, k) && !(get().days[k]?.plan || []).some(b => b.id === blockId(r, k))) adds.push([k, r]);
+  }
+  if (!adds.length) return;
+  update(s => { for (const [k, r] of adds) { const d = ensureDay(s, k); d.plan.push(blockFor(r, k)); d.plan.sort((p, q) => p.start - q.start); } });
 }
 
 function modalReorg(title = 'Réorganiser la journée') {
@@ -661,6 +695,10 @@ async function gcalAutoSync({ interactive = false } = {}) {
     step = 'envoi';
     const prov = new gg.GoogleCalendarProvider(get().settings.gcalId), today = dayKey();
     for (let i = 6; i >= 0; i--) { const dk = addDays(today, -i); if (i === 0 || userDay(get().days[dk])) await gcalPushDay(dk, prov); }
+    for (let i = 1; i <= 14; i++) {                                       // créneaux fixes (répétés ou non) des jours à venir
+      const dk = addDays(today, i), dd = get().days[dk];
+      if (dd && (dd.plan.some(b => b.fixed && !IMPORTED.includes(b.source)) || Object.keys(dd.gcal || {}).length)) await gcalPushDay(dk, prov);
+    }
     await gcalWriteBack(prov);
     sysUpdate(s => { s.settings.gcalSync = Date.now(); s.settings.gcalMsg = ui.readErr ? `envoyé (lecture impossible : ${ui.readErr})` : 'importé et envoyé'; });
     ui.readErr = ''; ui.gcalTap = false; ui.gcalErr = '';
@@ -697,18 +735,18 @@ const userDay = d => !!d && (d.log.length > 0 || d.wakeActual != null || d.goals
 async function gcalPushDay(k, prov) {
   const st = get(), col = st.settings.colors, s0 = dayStartMs(k), day = st.days[k] || { plan: [], log: [] };
   const used = userDay(day);                                     // un jour où tu n'as rien fait (même avec des cours importés) n'a pas de « temps perdu »
-  const a = analyse(st, k, Date.now()), today = dayKey(), nowMin = minuteOf(Date.now(), today), remind = st.settings.gcalRemind;
+  const a = analyse(st, k, Date.now()), today = dayKey(), future = k > today, nowMin = minuteOf(Date.now(), today), remind = st.settings.gcalRemind;
   const mn = ms => Math.max(0, Math.min(1440, Math.round((ms - s0) / 60000)));
   const items = [
     // sessions prévues pas encore faites + créneaux fixes saisis dans l'app (rendez-vous, repas…) ; jamais les événements venant de Google
-    ...day.plan.filter(b => !IMPORTED.includes(b.source) && b.cat !== 'unk' && (b.fixed || (goalBlock(b) && blockDone(st, k, b, Date.now()) < (b.end - b.start) / 2)))
+    ...day.plan.filter(b => !IMPORTED.includes(b.source) && b.cat !== 'unk' && (b.fixed || (!future && goalBlock(b) && blockDone(st, k, b, Date.now()) < (b.end - b.start) / 2)))
       .map(b => ({ id: b.id, start: b.start, end: b.end, summary: `${b.unplanned ? '⚡' : emojiOf(b)} ${b.title}`, colorId: col[b.unplanned ? 'imp' : subOf(b)],
-        ...(remind && k === today && b.start > nowMin ? { remindMin: goalBlock(b) ? 0 : 10 } : {}) })),
+        ...(remind && (future || (k === today && b.start > nowMin)) && (b.cat === 'obl' || b.cat === 'prod' || b.cat === 'prep') ? { remindMin: b.fixed ? 10 : 0 } : {}) })),
     ...(remind && k === today ? checkIns({ nowM: nowMin, wake: a.wake, bed: a.bed, every: st.settings.checkEvery, busy: day.plan.filter(b => b.fixed && (b.cat === 'obl' || (b.cat === 'prod' && b.sub === 'trav'))) })
       .map(m => ({ id: `chk:${m}`, start: m, end: m + 5, summary: '🔔 Point rapide : ouvre Mon temps (que fais-tu ?)', remindMin: 0 })) : []),
-    ...day.log.filter(e => e.cat !== 'unk' && !e.id.startsWith('g:') && mn(e.end) > mn(e.start))
+    ...(future ? [] : day.log).filter(e => e.cat !== 'unk' && !e.id.startsWith('g:') && mn(e.end) > mn(e.start))
       .map(e => ({ id: `log:${e.id}`, start: mn(e.start), end: mn(e.end), summary: `${e.unplanned ? '⚡' : emojiOf(e)} ${e.title}`, colorId: col[e.unplanned ? 'imp' : subOf(e)] })),
-    ...(used ? a.lostSegs.map(g => ({ id: g.id, start: g.start, end: g.end, summary: `⬛ ${g.title}`, colorId: col.lost })) : []),
+    ...(used && !future ? a.lostSegs.map(g => ({ id: g.id, start: g.start, end: g.end, summary: `⬛ ${g.title}`, colorId: col.lost })) : []),
   ];
   const keep = day.log.filter(e => e.id.startsWith('g:')).map(e => e.id.slice(2));
   const r = await prov.pushDay(k, items, day.gcal || {}, keep);
@@ -848,8 +886,15 @@ document.addEventListener('click', e => {
     case 'block-edit': modalBlock(id); break;
     case 'block-del': {
       const bid = t.closest('form').dataset.id;
+      const b1 = get().days[ui.viewDay]?.plan.find(b => b.id === bid);
+      const allNext = !!b1?.recurId && confirm('Ce créneau se répète.\nOK = supprimer cette occurrence et toutes les suivantes\nAnnuler = seulement celle-ci');
       update(s => {
         const d = s.days[ui.viewDay], b0 = d.plan.find(b => b.id === bid);
+        const rule = b0?.recurId && (s.settings.recurBlocks || []).find(r => r.id === b0.recurId);
+        if (rule) {
+          if (allNext) { rule.until = addDays(ui.viewDay, -1); for (const [k, dd] of Object.entries(s.days)) if (k > ui.viewDay) dd.plan = dd.plan.filter(q => q.recurId !== rule.id); if (rule.until < rule.from) s.settings.recurBlocks = s.settings.recurBlocks.filter(r => r !== rule); }
+          else (rule.skip ||= []).push(ui.viewDay);
+        }
         if (b0 && IMPORTED.includes(b0.source)) (s.settings.overrides ||= {})[bid.replace(/:\d{4}-\d\d-\d\d$/, '')] = { hidden: true };   // masqué dans l'app (pas supprimé dans Google)
         d.plan = d.plan.filter(b => b.id !== bid);
       });
@@ -946,9 +991,9 @@ subscribe(() => { if (!inSys) gcalSoon(); if (!ui.modal) render(); });
 const typing = () => /INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName || '');
 setInterval(tick, 1000);
 const subDue = () => { const st = get().settings; return st.icsUrl && Date.now() - st.icsSync > 30 * 60000; };
-setInterval(() => { ensureRecurring(dayKey()); if (subDue()) syncSub(false); gcalTick(); notify.check(); if (!ui.modal && !typing() && !document.hidden) render(); }, 30000);
+setInterval(() => { ensureRecurring(dayKey()); ensureRecurBlocks(); if (subDue()) syncSub(false); gcalTick(); notify.check(); if (!ui.modal && !typing() && !document.hidden) render(); }, 30000);
 document.addEventListener('visibilitychange', () => { if (document.hidden) { if (dirtyAt && gcalEligible()) { dirtyAt = 0; gcalAutoSync(); } } else { gcalStart(); notify.check(); if (!ui.modal) render(); } });
-ensureRecurring(dayKey());
+ensureRecurring(dayKey()); ensureRecurBlocks();
 if (get().settings.gcalClientId) gg.preload();
 setTimeout(gcalStart, 1500);                      // laisse le temps au service Google de se charger
 if (subDue()) syncSub(false);
