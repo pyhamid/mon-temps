@@ -33,7 +33,9 @@ export function dayWindow(state, key) {
 /** Entrées du journal pouvant toucher ce jour (veille incluse) + segment en cours. */
 export function entriesOf(state, key, nowMs) {
   const list = [...(state.days[addDays(key, -1)]?.log || []), ...(state.days[key]?.log || [])];
-  if (state.current) list.push({ ...state.current, end: nowMs, open: true });
+  // Le chrono en cours passe EN PREMIER : il compte seulement là où aucune activité enregistrée ne couvre déjà la minute.
+  // (Sinon un chrono oublié effaçait les activités ajoutées après coup sur la même période.)
+  if (state.current) list.unshift({ ...state.current, end: nowMs, open: true });
   return list;
 }
 

@@ -218,7 +218,9 @@ function renderBilan() {
   const cut = key === dayKey() ? Math.min(minuteOf(now, key), a.bed) : key < dayKey() ? a.bed : 0;
   const assumed = (day?.plan || []).filter(b => b.fixed && b.cat !== 'unk' && b.start < cut).map(b => ({ b, s: t0 + b.start * 60000 }));
   const rows = [...log.map(e => ({ e, s: e.start })), ...assumed].sort((x, y) => x.s - y.s);
-  html += `<section class="card"><h2>Journal</h2>${rows.length ? rows.map(r => r.b ? `<div class="alert"><span>${hm(r.b.start)}–${hm(Math.min(r.b.end, cut))}
+  const cur = key === dayKey() ? st.current : null;
+  html += `<section class="card"><h2>Journal</h2>${cur ? `<div class="alert"><span>⏺ Depuis ${new Date(cur.start).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} · ${emojiOf(cur)} ${esc(cur.title)} <span class="tag">chrono en cours</span></span>
+    <span class="row tight"><button class="btn small" data-act="stop">⏹ Terminer</button></span></div>` : ''}${rows.length ? rows.map(r => r.b ? `<div class="alert"><span>${hm(r.b.start)}–${hm(Math.min(r.b.end, cut))}
     · ${emojiOf(r.b)} ${esc(r.b.title)} (${fmtDur(Math.min(r.b.end, cut) - r.b.start)}) <span class="tag">créneau fixe · supposé fait</span></span>
     <span class="row tight"><button class="btn small" data-act="block-edit" data-id="${r.b.id}" aria-label="Modifier">✎</button></span></div>`
     : (e => `<div class="alert"><span>${new Date(e.start).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}–${new Date(e.end).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
