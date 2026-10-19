@@ -2,9 +2,13 @@
 // Tu peux y changer la couleur (= le type), l'heure, le titre, ou supprimer un événement :
 // l'import applique ces changements aux activités de l'app, jours passés compris.
 import { dayKey, dayStartMs } from './time.js';
+import { CATS } from './analysis.js';
 
 /** Retire l'emoji de tête que l'app ajoute aux titres (« 📚 Signal » → « Signal »). */
 export const stripEmoji = t => (t || '').replace(/^[\p{Extended_Pictographic}‍️]+\s*/u, '').trim();
+/** « Non identifié » / « Temps perdu » recolorié en vraie catégorie : le titre devient le nom de la catégorie (« Divertissement volontaire »…). */
+const PLACEHOLDER = /^(non identifié|temps perdu)$/i;
+const titleFor = (t, k) => (PLACEHOLDER.test(t) && k.cat !== 'unk' ? (CATS[k.sub || k.cat]?.label || t) : t);
 
 const isLogItem = i => i.startsWith('log:') || i.startsWith('imp:');
 
@@ -45,13 +49,13 @@ export function applyMirror(st, events, classify, { fromMs, toMs, uid }) {
     return null;
   };
   const same = (en, e, k) => en.start === e.start && en.end === e.end && en.cat === k.cat && (en.sub || undefined) === (k.sub || undefined)
-    && !!en.unplanned === !!k.unplanned && (stripEmoji(e.title) ? en.title === stripEmoji(e.title) : true);
+    && !!en.unplanned === !!k.unplanned && (stripEmoji(e.title) ? en.title === titleFor(stripEmoji(e.title), k) : true);
   const apply = (en, e, k) => {
     en.start = e.start; en.end = e.end; en.cat = k.cat;
     if (k.sub) en.sub = k.sub; else delete en.sub;
     if (k.unplanned) en.unplanned = true; else delete en.unplanned;
     if (k.cat === 'unk') en.dontKnow = true; else delete en.dontKnow;
-    const t = stripEmoji(e.title); if (t) en.title = t;
+    const t = titleFor(stripEmoji(e.title), k); if (t) en.title = t;
   };
   const rehome = loc => {            // l'entrée appartient au jour où elle commence
     const nk = dayKey(new Date(loc.en.start));
@@ -59,7 +63,7 @@ export function applyMirror(st, events, classify, { fromMs, toMs, uid }) {
   };
   const minutes = (ms, dk) => Math.max(0, Math.min(1440, Math.round((ms - dayStartMs(dk)) / 60000)));
   const newEntry = (e, k, id) => {
-    const en = { id, cat: k.cat, title: stripEmoji(e.title) || 'Activité', goalId: null, start: e.start, end: e.end };
+    const en = { id, cat: k.cat, title: titleFor(stripEmoji(e.title), k) || 'Activité', goalId: null, start: e.start, end: e.end };
     apply(en, e, k);
     ensure(dayKey(new Date(e.start))).log.push(en);
     return en;
