@@ -5,7 +5,7 @@ import {
 import {
   dayKey, dayStartMs, addDays, dayLabel, dayShort, minuteOf, fmtHM, fmtDur, fmtPct, fmtClock, toInput, fromInput, uid, ceil5,
 } from './time.js';
-import { CATS, PICKABLE, analyse, insights, patterns, hasData, sessionElapsed, studyRate, prepRate, blockDone, dayWindow, entriesOf } from './analysis.js';
+import { CATS, PICKABLE, analyse, insights, patterns, hasData, usedDay, sessionElapsed, studyRate, prepRate, blockDone, dayWindow, entriesOf } from './analysis.js';
 import { checkIns } from './remind.js';
 import { REPEAT_LABEL, ruleMatches, blockFor, blockId, newRule } from './recur.js';
 import { propose, applyProposal } from './planner.js';
@@ -233,7 +233,7 @@ function renderBilan() {
 // ---------------------------------------------------------------- Semaine
 /** Évolution du taux d'étude sur 14 jours, avec moyenne des 7 derniers jours vs les 7 précédents. */
 function rateWeek(st, now, today) {
-  const rows = Array.from({ length: 14 }, (_, i) => { const k = addDays(today, i - 13); const an = hasData(st, k) ? analyse(st, k, now) : null; return { k, r: studyRate(an), p: prepRate(an) }; });
+  const rows = Array.from({ length: 14 }, (_, i) => { const k = addDays(today, i - 13); const an = usedDay(st, k) ? analyse(st, k, now) : null; return { k, r: studyRate(an), p: prepRate(an) }; });
   const avg = l => { const v = l.filter(x => x.r != null).map(x => x.r); return v.length ? v.reduce((x, y) => x + y, 0) / v.length : null; };
   const cur = avg(rows.slice(7)), prev = avg(rows.slice(0, 7));
   const avgP = l => { const v = l.filter(x => x.p != null).map(x => x.p); return v.length ? v.reduce((x, y) => x + y, 0) / v.length : null; }, curP = avgP(rows.slice(7));
@@ -249,7 +249,7 @@ function rateWeek(st, now, today) {
 function renderWeek() {
   const st = get(), now = Date.now(), today = dayKey();
   const days = Array.from({ length: 7 }, (_, i) => addDays(today, i - 6));
-  const rows = days.map(k => ({ k, a: hasData(st, k) ? analyse(st, k, now) : null }));
+  const rows = days.map(k => ({ k, a: usedDay(st, k) ? analyse(st, k, now) : null }));
   const have = rows.filter(r => r.a);
   const sum = f => have.reduce((x, r) => x + f(r.a), 0);
   const maxProd = Math.max(60, ...have.map(r => Math.max(r.a.focus, r.a.target)));
@@ -988,8 +988,8 @@ document.addEventListener('click', e => {
       try { localStorage.setItem('temps-backup-avant-recup', exportJSON()); } catch { /* stockage plein */ }
       const keep = { cloudPush: get().settings.cloudPush };           // réglage propre à l'appareil : on le garde
       importJSON(snap.text);
-      update(s => { Object.assign(s.settings, keep, { cloudHash: '' }); });
-      alert('Données du cloud récupérées.'); location.reload();
+      update(s => { Object.assign(s.settings, keep, { cloudHash: '', gcalAuto: false }); });   // cet appareil devient « lecteur » : il n'envoie plus rien à Google (sinon ses données plus anciennes écraseraient celles du téléphone)
+      alert('Données du cloud récupérées. Cet appareil les affiche sans rien renvoyer à Google (envoi automatique désactivé).'); location.reload();
     }); break;
     case 'export': {
       const a = document.createElement('a');

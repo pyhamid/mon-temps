@@ -42,6 +42,12 @@ export function entriesOf(state, key, nowMs) {
   return list;
 }
 
+/** Jour où tu as réellement utilisé l'app (activité enregistrée ou réveil confirmé) : seuls ces jours comptent dans les moyennes et tendances. */
+export function usedDay(state, key) {
+  const d = state.days[key];
+  return !!d && (d.log.length > 0 || d.wakeActual != null);
+}
+
 export function hasData(state, key) {
   const d = state.days[key];
   return !!d && (d.log.length > 0 || d.wakeActual != null || d.goals.length > 0 || d.plan.length > 0);
@@ -93,8 +99,11 @@ export function analyse(state, key, nowMs = Date.now()) {
   if (state.current && key === dayKey(new Date(nowMs))) bed = Math.min(1440, Math.max(bed, minuteOf(nowMs, key)));   // chrono en cours après l'heure de coucher prévue
   // Aujourd'hui, tant que le réveil n'est pas confirmé, on ne compte aucun temps inconnu.
   // (pendant 30 min après l'heure prévue seulement : ensuite on suppose le réveil à l'heure prévue, et les trous sont signalés)
-  const unconfirmed = state.days[key]?.wakeActual == null && key === dayKey(new Date(nowMs)) && minuteOf(nowMs, key) < wake + 30;
-  const upto = unconfirmed ? wake : Math.max(wake, Math.min(minuteOf(nowMs, key), bed));
+  const isToday = key === dayKey(new Date(nowMs));
+  const unconfirmed = state.days[key]?.wakeActual == null && isToday && minuteOf(nowMs, key) < wake + 30;
+  // Jour passé où tu n'as rien enregistré (ni activité ni réveil) : tu n'as pas utilisé l'app, on ne fabrique pas de « temps non identifié »
+  const unused = !isToday && key < dayKey(new Date(nowMs)) && !(day.log?.length) && state.days[key]?.wakeActual == null;
+  const upto = unconfirmed || unused ? wake : Math.max(wake, Math.min(minuteOf(nowMs, key), bed));
   const fixed = new Array(1440).fill(null), arr = new Array(1440).fill(null), lost = new Array(1440).fill(false);
   const fixedLost = new Array(1440).fill(false), impArr = new Array(1440).fill(false), subArr = new Array(1440).fill('etu');
 
