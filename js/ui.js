@@ -697,9 +697,9 @@ async function gcalAutoSync({ interactive = false } = {}) {
     step = 'envoi';
     const prov = new gg.GoogleCalendarProvider(get().settings.gcalId), today = dayKey();
     // d'habitude les 3 derniers jours ; une fois par jour (ou après une pause), un rattrapage sur 30 jours pour ne rien laisser de côté
-    const full = Date.now() - (get().settings.gcalFull || 0) > 20 * 3600000, back = full ? 30 : 2;
+    const full = Date.now() - (get().settings.gcalFull || 0) > 20 * 3600000 || get().settings.gcalFixV !== 2, back = full ? 30 : 2;
     for (let i = back; i >= 0; i--) { const dk = addDays(today, -i); if (i === 0 || userDay(get().days[dk])) await gcalPushDay(dk, prov); }
-    if (full) sysUpdate(s => { s.settings.gcalFull = Date.now(); });
+    if (full) sysUpdate(s => { s.settings.gcalFull = Date.now(); s.settings.gcalFixV = 2; });
     for (let i = 1; i <= 14; i++) {                                       // créneaux fixes (répétés ou non) des jours à venir
       const dk = addDays(today, i), dd = get().days[dk];
       if (dd && (dd.plan.some(b => b.fixed && !IMPORTED.includes(b.source)) || Object.keys(dd.gcal || {}).length)) await gcalPushDay(dk, prov);
@@ -801,8 +801,11 @@ async function gcalWriteBack(prov) {
   return out;
 }
 
-async function gcalRun(fn) {
-  try { await fn(); } catch (e) { alert(e.message); }
+/** Une seule opération d'écriture vers Google à la fois (sinon deux envois simultanés créent des événements en double). */
+async function gcalRun(fn, { lock = true } = {}) {
+  if (lock && gcalBusy) { alert('Une synchronisation avec Google est déjà en cours. Patiente quelques instants (elle se termine toute seule), puis réessaie si besoin.'); return; }
+  if (lock) gcalBusy = true;
+  try { await fn(); } catch (e) { alert(e.message); } finally { if (lock) gcalBusy = false; }
 }
 const formData = (form, sub) => Object.fromEntries(new FormData(form, sub).entries());
 
@@ -922,7 +925,7 @@ document.addEventListener('click', e => {
       closeModal(); break;
     }
     case 'ics-sync': syncSub(true); break;
-    case 'gcal-connect': gcalRun(async () => { await gg.connect(st.settings.gcalClientId); ui.gcalTap = false; update(s => { s.settings.gcalLinked = true; }); gcalAutoSync(); }); break;
+    case 'gcal-connect': gcalRun(async () => { await gg.connect(st.settings.gcalClientId); ui.gcalTap = false; update(s => { s.settings.gcalLinked = true; }); gcalAutoSync(); }, { lock: false }); break;
     case 'gcal-import': gcalImport({ interactive: true, notify: true }); break;
     case 'gcal-sync': gcalAutoSync({ interactive: true }); break;
     case 'color-set': update(s => { s.settings.colors[t.dataset.key] = t.dataset.id; }); break;
