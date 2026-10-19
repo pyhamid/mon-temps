@@ -29,6 +29,7 @@ export const DEFAULT_SETTINGS = {
   checkEvery: 120,         // un « point rapide » toutes les X minutes (0 = aucun)
   gcalLinked: false,       // le compte a déjà été autorisé sur cet appareil
   gcalSync: 0,
+  gcalFull: 0,             // dernier rattrapage complet (30 jours) vers Google
   gcalMsg: '',              // id du calendrier "Mon temps" créé par l'app
   colors: { ...DEFAULT_COLORS },   // code couleur (colorId Google par catégorie)
   notif: { reminder: true, late: true, unknown: true, end: true, reorg: true, pause: true },

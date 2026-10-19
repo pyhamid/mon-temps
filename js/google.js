@@ -44,15 +44,23 @@ export function connect(clientId, { silent = false } = {}) {
   });
 }
 
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let lastWrite = 0;
+/** Appel à l'API Google. Les écritures sont espacées, et si Google répond « trop de requêtes » on attend puis on réessaie (jusqu'à ~1 min). */
 async function api(path, opt = {}) {
-  if (!isConnected()) throw new Error('Non connecté à Google.');
-  const r = await fetch(API + path, { ...opt, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } });
-  if (!r.ok) {
-    let msg = r.statusText;
-    try { msg = (await r.json()).error?.message || msg; } catch { /* corps vide */ }
-    const e = new Error(`Google Agenda : ${msg}`); e.status = r.status; throw e;
+  for (let attempt = 0; ; attempt++) {
+    if (!isConnected()) throw new Error('Non connecté à Google.');
+    if (opt.method && opt.method !== 'GET') { const wait = lastWrite + 300 - Date.now(); if (wait > 0) await sleep(wait); lastWrite = Date.now(); }
+    const r = await fetch(API + path, { ...opt, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } });
+    if (r.ok) return r.status === 204 ? null : r.json();
+    if (r.status === 401) { token = null; expires = 0; try { localStorage.removeItem(TOK); } catch { /* ignoré */ } }   // accès refusé / expiré : on le jette, l'app redemandera
+    let msg = r.statusText, reason = '';
+    try { const j = (await r.json()).error; msg = j?.message || msg; reason = j?.errors?.[0]?.reason || ''; } catch { /* corps vide */ }
+    const limited = r.status === 429 || (r.status === 403 && /rate|quota/i.test(`${reason} ${msg}`));
+    if (limited && attempt < 6) { await sleep(Math.min(20000, 1500 * 2 ** attempt) + Math.random() * 400); continue; }
+    const e = new Error(limited ? 'Google limite temporairement le nombre de requêtes (trop d\'événements envoyés d\'un coup). Attends une minute puis réessaie : ce qui est déjà envoyé n\'est pas refait.' : `Google Agenda : ${msg}`);
+    e.status = r.status; throw e;
   }
-  return r.status === 204 ? null : r.json();
 }
 
 export class GoogleCalendarProvider extends CalendarProvider {

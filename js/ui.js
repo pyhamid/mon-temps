@@ -326,7 +326,7 @@ function renderSettingsRaw() {
     <label>Identifiant client Google <span class="small">(voir LISEZMOI)</span><input type="text" data-setting="gcalClientId" value="${esc(s.gcalClientId)}" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false"></label>
     <div class="row"><button class="btn primary" data-act="gcal-connect" ${s.gcalClientId ? '' : 'disabled'}>${gg.isConnected() ? 'Connecté ✓' : s.gcalLinked && !ui.gcalTap ? 'Compte lié ✓ (reconnexion automatique…)' : s.gcalLinked ? 'Se reconnecter à Google' : 'Se connecter à Google'}</button>
     <button class="btn" data-act="gcal-import" ${s.gcalClientId ? '' : 'disabled'}>Importer maintenant</button>
-    <button class="btn" data-act="gcal-push-week" ${s.gcalClientId ? '' : 'disabled'}>Envoyer les 7 derniers jours</button>
+    <button class="btn" data-act="gcal-push-week" ${s.gcalClientId ? '' : 'disabled'}>Envoyer les 30 derniers jours</button>
     <button class="btn" data-act="gcal-cleanup" ${s.gcalClientId ? '' : 'disabled'}>Nettoyer les doublons dans Google</button></div>
     <p class="muted small">Ce que tu as fait (études, travail, pauses…) est envoyé dans le calendrier « Mon temps », avec la couleur de sa catégorie. Tu peux y changer la <b>couleur</b> (= le type), l'<b>heure</b>, le <b>titre</b>, ou <b>supprimer</b> un événement, y compris ceux de hier. Puis clique sur « Importer maintenant » : l'app met à jour tes statistiques (30 derniers jours). Un trou noir recolorié devient une activité identifiée.</p>
     <label class="check"><input type="checkbox" data-setting="gcalAuto" ${s.gcalAuto ? 'checked' : ''}> Synchroniser automatiquement (importer + envoyer : à l'ouverture, toutes les 15 min, et 30 s après chaque modification)</label>
@@ -684,7 +684,7 @@ async function gcalImport({ interactive = false, notify = false } = {}) {
     else if (get().settings.gcalLinked) { ui.gcalTap = true; if (!ui.modal) render(); }   // il faudra un appui pour renouveler l'accès
   } finally { gcalBusy = false; }
 }
-/** Synchronisation complète et automatique : lit Google (cours, modifications), puis envoie ce que tu as fait (7 derniers jours + rappels du jour). */
+/** Synchronisation complète et automatique : lit Google (cours, modifications), puis envoie ce que tu as fait (rattrapage sur 30 jours + rappels du jour). */
 async function gcalAutoSync({ interactive = false } = {}) {
   const clientId = get().settings.gcalClientId;
   if (!clientId || gcalBusy) return;
@@ -696,7 +696,10 @@ async function gcalAutoSync({ interactive = false } = {}) {
     try { await gcalReadAll(); } catch (e) { if (/connect|autoris|permission|401|403/i.test(e.message)) throw e; ui.readErr = e.message; }   // une lecture ratée n'empêche pas l'envoi
     step = 'envoi';
     const prov = new gg.GoogleCalendarProvider(get().settings.gcalId), today = dayKey();
-    for (let i = 6; i >= 0; i--) { const dk = addDays(today, -i); if (i === 0 || userDay(get().days[dk])) await gcalPushDay(dk, prov); }
+    // d'habitude les 3 derniers jours ; une fois par jour (ou après une pause), un rattrapage sur 30 jours pour ne rien laisser de côté
+    const full = Date.now() - (get().settings.gcalFull || 0) > 20 * 3600000, back = full ? 30 : 2;
+    for (let i = back; i >= 0; i--) { const dk = addDays(today, -i); if (i === 0 || userDay(get().days[dk])) await gcalPushDay(dk, prov); }
+    if (full) sysUpdate(s => { s.settings.gcalFull = Date.now(); });
     for (let i = 1; i <= 14; i++) {                                       // créneaux fixes (répétés ou non) des jours à venir
       const dk = addDays(today, i), dd = get().days[dk];
       if (dd && (dd.plan.some(b => b.fixed && !IMPORTED.includes(b.source)) || Object.keys(dd.gcal || {}).length)) await gcalPushDay(dk, prov);
@@ -706,13 +709,14 @@ async function gcalAutoSync({ interactive = false } = {}) {
     ui.readErr = ''; ui.gcalTap = false; ui.gcalErr = '';
   } catch (e) {
     ui.gcalErr = `${step} : ${e.message}`;
+    console.error('synchro Google', step, e);
     if (interactive) alert(e.message);
     else { ui.gcalTap = true; dirtyAt = Date.now() + 90000; sysUpdate(s => { s.settings.gcalMsg = `échec (${ui.gcalErr})`; }); }   // nouvel essai dans ~2 min
   } finally { gcalBusy = false; }
 }
 let dirtyAt = 0;           // dernière modification pas encore envoyée à Google (0 = rien en attente)
 /** À chaque modification faite par toi : l'envoi vers Google part dans ~10 s (ou tout de suite si tu quittes l'app). */
-const gcalSoon = () => { dirtyAt = dirtyAt || Date.now(); };
+const gcalSoon = () => { dirtyAt = Math.min(dirtyAt || Infinity, Date.now()); };      // une nouvelle modification annule l'attente d'un nouvel essai après échec
 const gcalEligible = () => { const s = get().settings; return s.gcalAuto && s.gcalLinked && s.gcalClientId && !gcalBusy && (gg.isConnected() || Date.now() - (ui.lastTry || 0) > 120000); };
 /** Appelé toutes les 30 s et au retour dans l'app. */
 function gcalTick() {
@@ -942,9 +946,9 @@ document.addEventListener('click', e => {
       if (needsRelink()) await gcalReadAll();
       const prov = new gg.GoogleCalendarProvider(get().settings.gcalId);
       let tot = { created: 0, updated: 0, deleted: 0, written: 0, readOnly: 0 };
-      for (let i = 6; i >= 0; i--) { const dk = addDays(key, -i); if (!userDay(get().days[dk])) continue; const r = await gcalPushDay(dk, prov); for (const q in tot) tot[q] += r[q]; }
+      for (let i = 30; i >= 0; i--) { const dk = addDays(key, -i); if (!userDay(get().days[dk])) continue; const r = await gcalPushDay(dk, prov); for (const q in tot) tot[q] += r[q]; }
       Object.assign(tot, await gcalWriteBack(prov));
-      alert(`7 derniers jours envoyés : ${tot.created} créé(s), ${tot.updated} mis à jour, ${tot.deleted} supprimé(s)${tot.written ? `, ${tot.written} événement(s) d'origine modifié(s)` : ''}${tot.readOnly ? `, ${tot.readOnly} en lecture seule` : ''}.`);
+      alert(`30 derniers jours envoyés : ${tot.created} créé(s), ${tot.updated} mis à jour, ${tot.deleted} supprimé(s)${tot.written ? `, ${tot.written} événement(s) d'origine modifié(s)` : ''}${tot.readOnly ? `, ${tot.readOnly} en lecture seule` : ''}.`);
     }); break;
     case 'notif-perm': notify.askPermission().then(render); break;
     case 'notif-test': notify.test(); break;
