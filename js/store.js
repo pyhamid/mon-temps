@@ -24,6 +24,8 @@ export const DEFAULT_SETTINGS = {
   recurBlocks: [],         // créneaux fixes répétés : {id,title,start,end,cat,sub?,mode,dow,from,until,skip[]}
   recurring: [],           // objectifs répétés du lundi au vendredi : {id,title,target,hard}
   lastBackup: 0,           // dernière sauvegarde exportée (ms)
+  cloudPush: /Android|iPhone|iPad|Mobile/i.test(globalThis.navigator?.userAgent || ''),   // sauvegarde auto des données dans le cloud : activée sur téléphone seulement (évite qu'un ordinateur écrase le téléphone)
+  cloudAt: 0, cloudHash: '', cloudMsg: '',
   gcalAuto: true,          // synchroniser Google automatiquement (import + envoi)
   gcalRemind: true,        // rappels (notifications) via Google Agenda : début de session, points rapides
   checkEvery: 120,         // un « point rapide » toutes les X minutes (0 = aucun)

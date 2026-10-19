@@ -339,6 +339,12 @@ function renderSettingsRaw() {
     <label class="btn file">Importer un .ics<input type="file" accept=".ics,text/calendar" data-file="ics" hidden></label></section>
     <section class="card"><h2>🔒 Sécurité</h2><p class="muted">Le code n'est demandé qu'une fois sur cet appareil si tu as coché « Rester connecté ». « Verrouiller maintenant » le redemandera.</p>
     <div class="row"><button class="btn" data-act="lock-now">Verrouiller maintenant</button></div></section>
+    <section class="card"><h2>☁️ Mes données sur tous mes appareils</h2>
+    <p class="muted">Le téléphone sauvegarde ses données dans ton Google (calendrier « Mon temps – données »). Sur l'ordinateur, « Récupérer » les affiche : tu retrouves exactement ce que tu vois sur le téléphone.</p>
+    <label class="check"><input type="checkbox" data-setting="cloudPush" ${s.cloudPush ? 'checked' : ''}> Sauvegarder automatiquement les données de <b>cet appareil</b> dans le cloud</label>
+    <div class="row"><button class="btn" data-act="cloud-save" ${s.gcalClientId ? '' : 'disabled'}>⬆️ Sauvegarder maintenant</button><button class="btn" data-act="cloud-load" ${s.gcalClientId ? '' : 'disabled'}>⬇️ Récupérer les données du cloud</button></div>
+    <p class="muted small">${s.cloudAt ? `Dernière sauvegarde de cet appareil : ${new Date(s.cloudAt).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}.` : 'Aucune sauvegarde envoyée depuis cet appareil.'} ${esc(s.cloudMsg || '')}</p>
+    <p class="muted small">⚠️ « Récupérer » remplace les données de cet appareil par celles du cloud (une copie de secours est gardée).</p></section>
     <section class="card"><h2>Données</h2><p class="muted">Tout reste sur cet appareil. Exporte régulièrement une sauvegarde.</p>
     <div class="row"><button class="btn" data-act="export">Exporter</button>
     <label class="btn file">Importer<input type="file" accept="application/json" data-file="backup" hidden></label>
@@ -706,6 +712,7 @@ async function gcalAutoSync({ interactive = false } = {}) {
     }
     await gcalWriteBack(prov);
     sysUpdate(s => { s.settings.gcalSync = Date.now(); s.settings.gcalMsg = ui.readErr ? `envoyé (lecture impossible : ${ui.readErr})` : 'importé et envoyé'; });
+    if (get().settings.cloudPush) { try { await cloudUpload(prov); } catch (e) { sysUpdate(x => { x.settings.cloudMsg = `Sauvegarde cloud impossible : ${e.message}`; }); } }
     ui.readErr = ''; ui.gcalTap = false; ui.gcalErr = '';
   } catch (e) {
     ui.gcalErr = `${step} : ${e.message}`;
@@ -713,6 +720,19 @@ async function gcalAutoSync({ interactive = false } = {}) {
     if (interactive) alert(e.message);
     else { ui.gcalTap = true; dirtyAt = Date.now() + 90000; sysUpdate(s => { s.settings.gcalMsg = `échec (${ui.gcalErr})`; }); }   // nouvel essai dans ~2 min
   } finally { gcalBusy = false; }
+}
+/** Envoie une copie compressée de toutes les données dans le cloud (si elles ont changé, ou si force). */
+async function cloudUpload(prov, force = false) {
+  const st = get(), s = st.settings, keepFrom = addDays(dayKey(), -120);
+  const snap = JSON.parse(exportJSON()); delete snap.notified;
+  for (const k of Object.keys(snap.days)) if (k < keepFrom) delete snap.days[k];
+  const sig = JSON.stringify([snap.days, snap.current, snap.session, snap.settings.recurring, snap.settings.recurBlocks, snap.settings.colors, snap.settings.overrides, snap.settings.minGap, snap.settings.bed, snap.settings.wake]);
+  let h = 0; for (let i = 0; i < sig.length; i++) h = (h * 31 + sig.charCodeAt(i)) | 0;
+  if (!force && String(h) === s.cloudHash) return false;
+  const dev = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) ? 'téléphone' : 'ordinateur';
+  const r = await prov.saveSnapshot(JSON.stringify(snap), { dev });
+  sysUpdate(x => { Object.assign(x.settings, { cloudAt: r.at, cloudHash: String(h), cloudMsg: '' }); });
+  return true;
 }
 let dirtyAt = 0;           // dernière modification pas encore envoyée à Google (0 = rien en attente)
 /** À chaque modification faite par toi : l'envoi vers Google part dans ~10 s (ou tout de suite si tu quittes l'app). */
@@ -955,6 +975,22 @@ document.addEventListener('click', e => {
     }); break;
     case 'notif-perm': notify.askPermission().then(render); break;
     case 'notif-test': notify.test(); break;
+    case 'cloud-save': gcalRun(async () => {
+      if (!gg.isConnected()) await gg.connect(st.settings.gcalClientId);
+      await cloudUpload(new gg.GoogleCalendarProvider(get().settings.gcalId), true);
+      alert('Données sauvegardées dans le cloud.');
+    }); break;
+    case 'cloud-load': gcalRun(async () => {
+      if (!gg.isConnected()) await gg.connect(st.settings.gcalClientId);
+      const snap = await new gg.GoogleCalendarProvider(get().settings.gcalId).loadSnapshot();
+      if (!snap) return alert('Aucune sauvegarde trouvée dans le cloud. Sur le téléphone : Réglages, « Sauvegarder maintenant ».');
+      if (!confirm(`Remplacer les données de cet appareil par la sauvegarde du ${new Date(snap.at).toLocaleString('fr-FR')} (${snap.dev || 'appareil inconnu'}) ?\nUne copie de secours des données actuelles est gardée.`)) return;
+      try { localStorage.setItem('temps-backup-avant-recup', exportJSON()); } catch { /* stockage plein */ }
+      const keep = { cloudPush: get().settings.cloudPush };           // réglage propre à l'appareil : on le garde
+      importJSON(snap.text);
+      update(s => { Object.assign(s.settings, keep, { cloudHash: '' }); });
+      alert('Données du cloud récupérées.'); location.reload();
+    }); break;
     case 'export': {
       const a = document.createElement('a');
       a.href = URL.createObjectURL(new Blob([exportJSON()], { type: 'application/json' }));

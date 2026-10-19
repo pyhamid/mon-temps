@@ -10,6 +10,7 @@ import { dayStartMs } from './time.js';
 const SCOPES = 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.app.created https://www.googleapis.com/auth/calendar.events';
 const API = 'https://www.googleapis.com/calendar/v3';
 const CAL_NAME = 'Mon temps';
+const DATA_NAME = 'Mon temps – données (sauvegarde)';
 const TOK = 'temps-gtok';
 let token = null, expires = 0;
 try { const t = JSON.parse(localStorage.getItem(TOK)); if (t && t.expires > Date.now()) ({ token, expires } = t); } catch { /* aucun jeton gardé */ }
@@ -44,6 +45,17 @@ export function connect(clientId, { silent = false } = {}) {
   });
 }
 
+async function gzipB64(text) {
+  const buf = await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
+  const u = new Uint8Array(buf); let bin = '';
+  for (let i = 0; i < u.length; i += 0x8000) bin += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+async function ungzipB64(b64) {
+  const bin = atob(b64), u = Uint8Array.from(bin, c => c.charCodeAt(0));
+  return new Response(new Blob([u]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+}
+export { gzipB64, ungzipB64 };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 let lastWrite = 0;
 /** Appel à l'API Google. Les écritures sont espacées, et si Google répond « trop de requêtes » on attend puis on réessaie (jusqu'à ~1 min). */
@@ -126,6 +138,41 @@ export class GoogleCalendarProvider extends CalendarProvider {
   async findCalendars() {
     const list = await api('/users/me/calendarList?minAccessRole=owner');
     return (list.items || []).filter(c => c.summary === CAL_NAME).map(c => c.id);
+  }
+
+  // ---- Sauvegarde de toutes les données de l'app (pour les retrouver sur un autre appareil) ----
+  // Un seul événement « toute la journée » daté de l'an 2000, dans un calendrier à part, qui contient les données compressées (gzip + base64) découpées en morceaux.
+  async ensureDataCalendar() {
+    if (this.dataCalId) return this.dataCalId;
+    const list = await api('/users/me/calendarList?minAccessRole=owner');
+    const found = (list.items || []).find(c => c.summary === DATA_NAME);
+    if (found) return (this.dataCalId = found.id);
+    const c = await api('/calendars', { method: 'POST', body: JSON.stringify({ summary: DATA_NAME, description: 'Copie de sauvegarde des données de Mon temps. Ne pas supprimer.', timeZone: tz() }) });
+    return (this.dataCalId = c.id);
+  }
+  async _snapshotEvent(cal) {
+    const r = await api(`/calendars/${encodeURIComponent(cal)}/events?timeMin=${encodeURIComponent('1999-12-30T00:00:00Z')}&timeMax=${encodeURIComponent('2000-01-04T00:00:00Z')}&singleEvents=true&maxResults=20`);
+    return (r.items || []).find(e => e.extendedProperties?.private?.mtd) || null;
+  }
+  /** Enregistre le texte (JSON de l'app) dans le cloud. meta = { dev } */
+  async saveSnapshot(text, meta = {}) {
+    const cal = await this.ensureDataCalendar(), b64 = await gzipB64(text), chunks = b64.match(/[^]{1,900}/g) || [];
+    if (chunks.length > 30) throw new Error('Sauvegarde trop volumineuse pour le cloud.');
+    const priv = { mtd: '1', n: String(chunks.length), at: String(Date.now()), dev: meta.dev || '' };
+    chunks.forEach((c, i) => { priv[`c${i}`] = c; });
+    const body = JSON.stringify({ summary: '💾 Sauvegarde Mon temps (ne pas supprimer)', start: { date: '2000-01-01' }, end: { date: '2000-01-02' }, transparency: 'transparent', reminders: { useDefault: false, overrides: [] }, extendedProperties: { private: priv } });
+    const ex = await this._snapshotEvent(cal);
+    if (ex) await api(`/calendars/${encodeURIComponent(cal)}/events/${ex.id}`, { method: 'PUT', body });
+    else await api(`/calendars/${encodeURIComponent(cal)}/events`, { method: 'POST', body });
+    return { at: Number(priv.at), size: b64.length };
+  }
+  /** Relit la sauvegarde du cloud : { text, at, dev } ou null. */
+  async loadSnapshot() {
+    const cal = await this.ensureDataCalendar(), ev = await this._snapshotEvent(cal);
+    if (!ev) return null;
+    const p = ev.extendedProperties.private, n = Number(p.n) || 0;
+    let b64 = ''; for (let i = 0; i < n; i++) b64 += p[`c${i}`] || '';
+    return { text: await ungzipB64(b64), at: Number(p.at) || 0, dev: p.dev || '' };
   }
 
   /** Retourne l'id du calendrier « Mon temps » : réutilise celui qui existe déjà (même créé depuis un autre appareil), sinon le crée. */
