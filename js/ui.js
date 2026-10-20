@@ -89,7 +89,7 @@ function renderHome() {
     sigs.push({ icon: '🗒️', text: 'Aucun objectif pour aujourd\'hui. Définis-les dans l\'onglet Planning pour obtenir un planning proposé.', action: 'tab-plan' });
   if (ui.gcalTap) sigs.unshift({ icon: '📅', text: `Google Agenda n'est pas à jour${ui.gcalErr ? ` (${ui.gcalErr})` : ''}. Un appui pour synchroniser.`, action: 'gcal-sync' });
   const used = Object.keys(st.days).filter(k => st.days[k].log.length).length;
-  if (used >= 3 && Date.now() - st.settings.lastBackup > 14 * 86400000)
+  if (used >= 3 && Date.now() - st.settings.lastBackup > 14 * 86400000 && Date.now() - (st.settings.cloudAt || 0) > 3 * 86400000)
     sigs.push({ icon: '💾', text: 'Sauvegarde conseillée : tes données ne sont que sur cet appareil (Réglages, puis Exporter).', action: 'tab-settings' });
   sigs.sort((x, y) => (y.type === 'unknown') - (x.type === 'unknown'));            // le temps non identifié d'abord
   const shown = sigs.slice(0, 4), more = sigs.length - shown.length;
