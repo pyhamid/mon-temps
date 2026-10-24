@@ -23,7 +23,7 @@ const ui = { tab: 'home', viewDay: dayKey(), modal: null, open: {} };
 // L'onglet et le jour affichés survivent à un rechargement (adresse #plan, #bilan…)
 try { const t = location.hash.slice(1); if (['home', 'plan', 'bilan', 'week', 'settings'].includes(t)) ui.tab = t; const v = sessionStorage.getItem('temps-vd'); if (/^\d{4}-\d\d-\d\d$/.test(v || '')) ui.viewDay = v; } catch { /* ignoré */ }
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const SHORT = { unk: 'Temps perdu', etu: 'Études', prep: 'Préparation', trav: 'Travail', obl: 'Obligation', vie: 'Quotidien', pause: 'Pause', loisir: 'Loisir' };
+const SHORT = { islam: 'Islam', unk: 'Temps perdu', etu: 'Études', prep: 'Préparation', trav: 'Travail', obl: 'Obligation', vie: 'Quotidien', pause: 'Pause', loisir: 'Loisir' };
 /** Choix du sélecteur ('etu' | 'trav' | autre) → catégorie interne + type de travail productif. */
 const splitCat = v => (v === 'etu' || v === 'trav') ? { cat: 'prod', sub: v } : { cat: v };
 const goalBlock = b => b.cat === 'prod' || (b.cat === 'obl' && !!b.goalId);   // session d'objectif (études, travail ou obligation)
@@ -106,7 +106,8 @@ function rateBlock(a) {
   return `<div class="rate"><b>${r == null ? '—' : Math.round(r) + ' %'}</b><span>📚 du temps disponible consacré aux études</span>
     <small>${r == null ? 'Pas encore assez de temps disponible pour calculer.' : `${fmtDur(a.sub.etu)} d'études sur ${fmtDur(a.availSoFar)} disponibles`}</small>
     ${r == null ? '' : `<div class="bar"><i style="width:${Math.min(100, r)}%"></i></div>`}
-    <div class="rate2"><b>${p == null ? '—' : Math.round(p) + ' %'}</b> <span>🗂️ en préparation des études${p == null ? '' : ` (${fmtDur(a.cat.prep)})`}</span></div></div>`;
+    <div class="rate2"><b>${p == null ? '—' : Math.round(p) + ' %'}</b> <span>🗂️ en préparation des études${p == null ? '' : ` (${fmtDur(a.cat.prep)})`}</span></div>
+    <div class="rate2"><b>${fmtDur(a.cat.islam)}</b> <span>🕌 consacrés à l'islam <small>(compté comme une obligation, hors temps disponible)</small></span></div></div>`;
 }
 
 function alertRow(s) {
@@ -190,11 +191,11 @@ function renderBilan() {
   let html = dayNav();
   if (!hasData(st, key) && key !== dayKey()) return html + '<section class="card"><p class="muted">Pas de données pour ce jour.</p></section>';
   html += `<section class="card"><h2>Journée du ${dayLabel(key)}</h2>${rateBlock(a)}<p>Temps éveillé : <b>${fmtDur(a.awake)}</b></p>
-    ${['etu', 'prep', 'trav', 'obl', 'vie', 'pause', 'loisir', 'unk'].map(c => { const v = c === 'etu' ? a.sub.etu : c === 'trav' ? a.sub.trav : a.cat[c]; return `
+    ${['etu', 'prep', 'trav', 'obl', 'islam', 'vie', 'pause', 'loisir', 'unk'].map(c => { const v = c === 'etu' ? a.sub.etu : c === 'trav' ? a.sub.trav : a.cat[c]; return `
       <div class="line c-${c}"><div class="lh"><span>${catChip(c)}</span><b>${fmtDur(v)} — ${fmtPct(v, a.awake)}</b></div>
       <div class="bar"><i style="width:${a.awake ? v / a.awake * 100 : 0}%"></i></div></div>`; }).join('')}
     ${a.unplanned ? `<div class="line c-imp"><div class="lh"><span>⚡ dont imprévus</span><b>${fmtDur(a.unplanned)} — ${fmtPct(a.unplanned, a.awake)}</b></div><div class="bar"><i style="width:${a.awake ? a.unplanned / a.awake * 100 : 0}%"></i></div></div>` : ''}
-    <p class="muted">Temps réellement disponible (éveillé − obligations − travail − vie quotidienne) : <b>${fmtDur(a.availSoFar)}</b>.
+    <p class="muted">Temps réellement disponible (éveillé − obligations − islam − travail − vie quotidienne) : <b>${fmtDur(a.availSoFar)}</b>.
     ${a.unkPending ? ` Dont ${fmtDur(a.unkPending)} à identifier.` : ''}${a.unkLost ? ` ${fmtDur(a.unkLost)} déclarés « je ne sais plus » (temps perdu estimé).` : ''}</p></section>`;
 
   const ins = insights(a), pat = patterns(st, key, now);
@@ -233,15 +234,17 @@ function renderBilan() {
 // ---------------------------------------------------------------- Semaine
 /** Évolution du taux d'étude sur 14 jours, avec moyenne des 7 derniers jours vs les 7 précédents. */
 function rateWeek(st, now, today) {
-  const rows = Array.from({ length: 14 }, (_, i) => { const k = addDays(today, i - 13); const an = usedDay(st, k) ? analyse(st, k, now) : null; return { k, r: studyRate(an), p: prepRate(an) }; });
+  const rows = Array.from({ length: 14 }, (_, i) => { const k = addDays(today, i - 13); const an = usedDay(st, k) ? analyse(st, k, now) : null; return { k, r: studyRate(an), p: prepRate(an), i: an ? an.cat.islam : null }; });
   const avg = l => { const v = l.filter(x => x.r != null).map(x => x.r); return v.length ? v.reduce((x, y) => x + y, 0) / v.length : null; };
   const cur = avg(rows.slice(7)), prev = avg(rows.slice(0, 7));
+  const isl = rows.slice(7).filter(x => x.i != null).map(x => x.i), avgIsl = isl.length ? isl.reduce((x, y) => x + y, 0) / isl.length : 0;
   const avgP = l => { const v = l.filter(x => x.p != null).map(x => x.p); return v.length ? v.reduce((x, y) => x + y, 0) / v.length : null; }, curP = avgP(rows.slice(7));
   const trend = cur == null || prev == null ? '' : Math.abs(cur - prev) < 3 ? 'Stable par rapport aux 7 jours précédents.'
     : cur > prev ? `En hausse : +${Math.round(cur - prev)} points par rapport aux 7 jours précédents.` : `En baisse : −${Math.round(prev - cur)} points par rapport aux 7 jours précédents.`;
   return `<section class="card"><h2>📚 Taux d'étude</h2>
     <div class="rate"><b>${cur == null ? '—' : Math.round(cur) + ' %'}</b><span>moyenne des 7 derniers jours (études ÷ temps disponible)</span><small>${trend}</small>
-    <div class="rate2"><b>${curP == null ? '—' : Math.round(curP) + ' %'}</b> <span>🗂️ en préparation des études (moyenne 7 jours)</span></div></div>
+    <div class="rate2"><b>${curP == null ? '—' : Math.round(curP) + ' %'}</b> <span>🗂️ en préparation des études (moyenne 7 jours)</span></div>
+    <div class="rate2"><b>${fmtDur(avgIsl)}</b> <span>🕌 islam par jour (moyenne 7 jours)</span></div></div>
     ${rows.map(({ k, r }) => `<div class="wk"><span class="d">${dayShort(k)}</span><div class="track">${r != null ? `<i class="p" style="width:${Math.min(100, r)}%"></i>` : ''}</div><b>${r != null ? Math.round(r) + ' %' : '—'}</b></div>`).join('')}
     <p class="muted small">Un jour est compté seulement s'il a au moins 30 min de temps disponible.</p></section>`;
 }
@@ -261,7 +264,7 @@ function renderWeek() {
 
   html += `<section class="card"><h2>Détail par jour</h2>${rows.map(({ k, a }) => a ? `<div class="wd"><div class="wdh"><b>${dayShort(k)}</b>
       <span>🎯 ${fmtDur(a.focus)}${a.target ? ` <small>(${Math.round(a.goalDone / a.target * 100)} %)</small>` : ''}</span></div>
-      <div class="wdc"><span>📚 ${fmtDur(a.sub.etu)}</span><span>🗂️ ${fmtDur(a.cat.prep)}</span><span>💼 ${fmtDur(a.sub.trav)}</span><span>Dispo ${fmtDur(a.availSoFar)}</span><span>❓ ${fmtDur(a.cat.unk)}</span><span>🔴 ${fmtDur(a.cat.obl)}</span><span>🌿 ${fmtDur(a.cat.pause)}</span><span>🎮 ${fmtDur(a.cat.loisir)}</span>${a.unplanned ? `<span>⚡ ${fmtDur(a.unplanned)}</span>` : ''}</div></div>`
+      <div class="wdc"><span>📚 ${fmtDur(a.sub.etu)}</span><span>🗂️ ${fmtDur(a.cat.prep)}</span><span>🕌 ${fmtDur(a.cat.islam)}</span><span>💼 ${fmtDur(a.sub.trav)}</span><span>Dispo ${fmtDur(a.availSoFar)}</span><span>❓ ${fmtDur(a.cat.unk)}</span><span>🔴 ${fmtDur(a.cat.obl)}</span><span>🌿 ${fmtDur(a.cat.pause)}</span><span>🎮 ${fmtDur(a.cat.loisir)}</span>${a.unplanned ? `<span>⚡ ${fmtDur(a.unplanned)}</span>` : ''}</div></div>`
       : `<div class="wd muted"><div class="wdh"><b>${dayShort(k)}</b><span>—</span></div></div>`).join('')}</section>`;
 
   // tendances
@@ -767,8 +770,8 @@ async function gcalPushDay(k, prov) {
     // sessions prévues pas encore faites + créneaux fixes saisis dans l'app (rendez-vous, repas…) ; jamais les événements venant de Google
     ...day.plan.filter(b => !IMPORTED.includes(b.source) && b.cat !== 'unk' && (b.fixed || (!future && goalBlock(b) && blockDone(st, k, b, Date.now()) < (b.end - b.start) / 2)))
       .map(b => ({ id: b.id, start: b.start, end: b.end, summary: `${b.unplanned ? '⚡' : emojiOf(b)} ${b.title}`, colorId: col[b.unplanned ? 'imp' : subOf(b)],
-        ...(remind && (future || (k === today && b.start > nowMin)) && (b.cat === 'obl' || b.cat === 'prod' || b.cat === 'prep') ? { remindMin: b.fixed ? 10 : 0 } : {}) })),
-    ...(remind && k === today ? checkIns({ nowM: nowMin, wake: a.wake, bed: a.bed, every: st.settings.checkEvery, busy: day.plan.filter(b => b.fixed && (b.cat === 'obl' || (b.cat === 'prod' && b.sub === 'trav'))) })
+        ...(remind && (future || (k === today && b.start > nowMin)) && (b.cat === 'obl' || b.cat === 'islam' || b.cat === 'prod' || b.cat === 'prep') ? { remindMin: b.fixed ? 10 : 0 } : {}) })),
+    ...(remind && k === today ? checkIns({ nowM: nowMin, wake: a.wake, bed: a.bed, every: st.settings.checkEvery, busy: day.plan.filter(b => b.fixed && (b.cat === 'obl' || b.cat === 'islam' || (b.cat === 'prod' && b.sub === 'trav'))) })
       .map(m => ({ id: `chk:${m}`, start: m, end: m + 5, summary: '🔔 Point rapide : ouvre Mon temps (que fais-tu ?)', remindMin: 0 })) : []),
     ...(future ? [] : day.log).filter(e => e.cat !== 'unk' && !e.id.startsWith('g:') && mn(e.end) > mn(e.start))
       .map(e => ({ id: `log:${e.id}`, start: mn(e.start), end: mn(e.end), summary: `${e.unplanned ? '⚡' : emojiOf(e)} ${e.title}`, colorId: col[e.unplanned ? 'imp' : subOf(e)] })),

@@ -2,6 +2,7 @@
 const norm = s => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
 const RULES = [
+  ['islam', /priere|salat|salah|fajr|dhuhr|dohr|\basr\b|maghrib|\bisha\b|coran|quran|mosquee|islam|invocation|\bdoua\b|\bdua\b|jumu|tarawih/],
   ['prep', /organis|planifi|prepar\w* (mes |les |le |la |l'|ma |mon )?(cours|etude|revis|planning|semaine|examen|programme|fiche)|trier|classer|fiches?\b/],
   ['lost', /reseau|insta|tiktok|snap|facebook|scroll/],            // réseaux sociaux = temps perdu (même chose que « je ne sais plus »)
   ['vie', /manger|mange|repas|cuisin|dejeuner|diner|petit.?dej|douche|menage|courses|lessive|vaisselle|habill|prepar(e|ais) (mes|ma|le|la)|rang(e|ais)|toilette/],
